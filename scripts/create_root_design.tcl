@@ -46,7 +46,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# axi_pixel_not
+# bram_image_streamer
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -179,7 +179,7 @@ xilinx.com:ip:proc_sys_reset:5.0\
 set bCheckModules 1
 if { $bCheckModules == 1 } {
    set list_check_mods "\ 
-axi_pixel_not\
+bram_image_streamer\
 "
 
    set list_mods_missing ""
@@ -1135,24 +1135,23 @@ proc create_root_design { parentCell } {
   ] $system_ila_0
 
 
-  # Create instance: axi_pixel_not_0, and set properties
-  set block_name axi_pixel_not
-  set block_cell_name axi_pixel_not_0
-  if { [catch {set axi_pixel_not_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+  # Create instance: bram_image_streamer_0, and set properties
+  set block_name bram_image_streamer
+  set block_cell_name bram_image_streamer_0
+  if { [catch {set bram_image_streamer_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2095 -severity "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
-   } elseif { $axi_pixel_not_0 eq "" } {
+   } elseif { $bram_image_streamer_0 eq "" } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
   
   # Create interface connections
-  connect_bd_intf_net -intf_net axi_pixel_not_0_VIDEO_OUT [get_bd_intf_pins axi_pixel_not_0/VIDEO_OUT] [get_bd_intf_pins v_hdmi_tx_ss/VIDEO_IN]
-connect_bd_intf_net -intf_net [get_bd_intf_nets axi_pixel_not_0_VIDEO_OUT] [get_bd_intf_pins axi_pixel_not_0/VIDEO_OUT] [get_bd_intf_pins system_ila_0/SLOT_0_AXIS]
+  connect_bd_intf_net -intf_net bram_image_streamer_0_VIDEO_OUT [get_bd_intf_pins bram_image_streamer_0/VIDEO_OUT] [get_bd_intf_pins v_hdmi_tx_ss/VIDEO_IN]
+  connect_bd_intf_net -intf_net [get_bd_intf_nets bram_image_streamer_0_VIDEO_OUT] [get_bd_intf_pins bram_image_streamer_0/VIDEO_OUT] [get_bd_intf_pins system_ila_0/SLOT_0_AXIS]
   connect_bd_intf_net -intf_net intf_net_audio_ss_0_axis_audio_out [get_bd_intf_pins audio_ss_0/axis_audio_out] [get_bd_intf_pins v_hdmi_tx_ss/AUDIO_IN]
   connect_bd_intf_net -intf_net intf_net_bdry_in_DRU_CLK_IN [get_bd_intf_ports DRU_CLK_IN] [get_bd_intf_pins gt_refclk_buf/CLK_IN_D]
   connect_bd_intf_net -intf_net intf_net_rx_video_axis_reg_slice_M_AXIS [get_bd_intf_pins rx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins v_tpg_ss_0/s_axis_video]
-  connect_bd_intf_net -intf_net intf_net_tx_video_axis_reg_slice_M_AXIS [get_bd_intf_pins tx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins axi_pixel_not_0/VIDEO_IN]
   connect_bd_intf_net -intf_net intf_net_v_hdmi_rx_ss_AUDIO_OUT [get_bd_intf_pins v_hdmi_rx_ss/AUDIO_OUT] [get_bd_intf_pins audio_ss_0/axis_audio_in]
   connect_bd_intf_net -intf_net intf_net_v_hdmi_rx_ss_DDC_OUT [get_bd_intf_pins v_hdmi_rx_ss/DDC_OUT] [get_bd_intf_ports RX_DDC_OUT]
   connect_bd_intf_net -intf_net intf_net_v_hdmi_rx_ss_VIDEO_OUT [get_bd_intf_pins v_hdmi_rx_ss/VIDEO_OUT] [get_bd_intf_pins rx_video_axis_reg_slice/S_AXIS]
@@ -1268,7 +1267,7 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets axi_pixel_not_0_VIDEO_OUT] [get_
   [get_bd_pins v_hdmi_tx_ss/s_axis_video_aclk] \
   [get_bd_pins v_hdmi_rx_ss/s_axis_video_aclk] \
   [get_bd_pins system_ila_0/clk] \
-  [get_bd_pins axi_pixel_not_0/aclk]
+  [get_bd_pins bram_image_streamer_0/aclk]
   connect_bd_net -net net_zynq_us_ss_0_dcm_locked  [get_bd_pins zynq_us_ss_0/dcm_locked] \
   [get_bd_pins rx_video_axis_reg_slice/aresetn] \
   [get_bd_pins v_tpg_ss_0/m_axi_aresetn] \
@@ -1276,7 +1275,7 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets axi_pixel_not_0_VIDEO_OUT] [get_
   [get_bd_pins v_hdmi_tx_ss/s_axis_video_aresetn] \
   [get_bd_pins v_hdmi_rx_ss/s_axis_video_aresetn] \
   [get_bd_pins system_ila_0/resetn] \
-  [get_bd_pins axi_pixel_not_0/aresetn]
+  [get_bd_pins bram_image_streamer_0/aresetn]
   connect_bd_net -net net_zynq_us_ss_0_peripheral_aresetn  [get_bd_pins zynq_us_ss_0/peripheral_aresetn] \
   [get_bd_pins audio_ss_0/ARESETN] \
   [get_bd_pins v_hdmi_tx_ss/s_axi_cpu_aresetn] \
@@ -1307,6 +1306,7 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets axi_pixel_not_0_VIDEO_OUT] [get_
   # Restore current instance
   current_bd_instance $oldCurInst
 
+  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
@@ -1318,6 +1318,4 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets axi_pixel_not_0_VIDEO_OUT] [get_
 
 create_root_design ""
 
-
-common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
 

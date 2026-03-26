@@ -59,6 +59,10 @@ if { [get_runs impl_1] ne "" } {
 # Launch synthesis
 # --------------------------------------------
 puts "==> Running synthesis..."
+
+# Increase the max loop limit (necessary for ROM with image)
+set_param synth.elaboration.rodinMoreOptions "rt::set_parameter max_loop_limit 1200000"
+
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
 

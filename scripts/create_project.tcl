@@ -21,7 +21,8 @@ proc checkRequiredFiles { origin_dir} {
   set status true
   set files [list \
  "[file normalize "$origin_dir/src/constraints/hdmi_example_zcu102.xdc"]"\
- "[file normalize "$origin_dir/src/rtl/AxiPixelNot.v"]"\
+ "[file normalize "$origin_dir/src/rtl/bram_image_streamer.vhd"]"\
+ "[file normalize "$origin_dir/src/data/image.mem"]"\
   ]
   foreach ifile $files {
     if { ![file isfile $ifile] } {
@@ -111,7 +112,7 @@ if { $validate_required } {
 }
 
 # Create project
-create_project ${_xil_proj_name_} ./${_xil_proj_name_} -part xczu9eg-ffvb1156-2-e
+create_project ${_xil_proj_name_} ./${_xil_proj_name_} -part xczu9eg-ffvb1156-2-e -force
 
 # Set the directory path for the new project
 set proj_dir [get_property directory [current_project]]
@@ -135,7 +136,8 @@ set_property -name "platform.board_id" -value "zcu102" -objects $obj
 set_property -name "revised_directory_structure" -value "1" -objects $obj
 set_property -name "sim.central_dir" -value "$proj_dir/${_xil_proj_name_}.ip_user_files" -objects $obj
 set_property -name "sim.ip.auto_export_scripts" -value "1" -objects $obj
-set_property -name "simulator_language" -value "Mixed" -objects $obj
+set_property -name "simulator_language" -value "VHDL" -objects $obj
+set_property -name "target_language" -value "VHDL" -objects $obj
 set_property -name "sim_compile_state" -value "1" -objects $obj
 set_property -name "use_inline_hdl_ip" -value "1" -objects $obj
 set_property -name "xpm_libraries" -value "XPM_CDC XPM_FIFO XPM_MEMORY" -objects $obj
@@ -148,17 +150,23 @@ if {[string equal [get_filesets -quiet sources_1] ""]} {
 # Set 'sources_1' fileset object
 set obj [get_filesets sources_1]
 set files [list \
- [file normalize "${origin_dir}/src/rtl/AxiPixelNot.v"] \
+ [file normalize "${origin_dir}/src/rtl/bram_image_streamer.vhd"] \
+ [file normalize "${origin_dir}/src/data/image.mem"] \
 ]
 add_files -norecurse -fileset $obj $files
 
 # Set 'sources_1' fileset file properties for remote files
-set file "${origin_dir}/src/rtl/AxiPixelNot.v"
+set file "${origin_dir}/src/rtl/bram_image_streamer.vhd"
 set file [file normalize $file]
 set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
 set_property -name "used_in" -value "synthesis implementation" -objects $file_obj
 set_property -name "used_in_simulation" -value "0" -objects $file_obj
-set_property -name "file_type" -value "Verilog" -objects $file_obj
+set_property -name "file_type" -value "VHDL" -objects $file_obj
+
+set file "$origin_dir/src/data/image.mem"
+set file [file normalize $file]
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "file_type" -value "Memory Initialization Files" -objects $file_obj
 
 
 # Set 'sources_1' fileset file properties for local files
@@ -542,6 +550,10 @@ move_dashboard_gadget -name {methodology_1} -row 2 -col 1
 
 source scripts/create_root_design.tcl
 
+# Set the absolute path to image.mem on the IP instance
+set mem_path [get_files image.mem]
+set_property -dict [list CONFIG.MEM_INIT_FILE $mem_path] [get_bd_cells bram_image_streamer_0]
+
 set_property REGISTERED_WITH_MANAGER "1" [get_files exdes.bd ] 
 set_property SYNTH_CHECKPOINT_MODE "Hierarchical" [get_files exdes.bd ] 
 set_property USED_IN "synthesis implementation" [get_files exdes.bd ] 
@@ -549,7 +561,7 @@ set_property USED_IN_SIMULATION "0" [get_files exdes.bd ]
 
 #call make_wrapper to create wrapper files
 if { [get_property IS_LOCKED [ get_files -norecurse [list exdes.bd]] ] == 1  } {
-  import_files -fileset sources_1 [file normalize "${origin_dir}/${_xil_proj_name_}.gen/sources_1/bd/exdes/hdl/exdes_wrapper.v" ]
+  import_files -fileset sources_1 [file normalize "${origin_dir}/${_xil_proj_name_}.gen/sources_1/bd/exdes/hdl/exdes_wrapper.vhd" ]
 } else {
   set wrapper_path [make_wrapper -fileset sources_1 -files [ get_files -norecurse [list exdes.bd]] -top]
   add_files -norecurse -fileset sources_1 $wrapper_path
