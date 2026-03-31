@@ -66,8 +66,8 @@ entity ddr4_frame_buffer is
         sw_read         : in  std_logic;
 
         -- MIG clock domain
-        mig_clk             : in  std_logic;
-        mig_rst             : in  std_logic;
+        mig_clk              : in  std_logic;
+        mig_rst              : in  std_logic;
         init_calib_complete  : in  std_logic;
 
         -- MIG app interface
