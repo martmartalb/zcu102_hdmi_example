@@ -55,6 +55,14 @@ end ddr4_frame_buffer_top ;
 
 architecture arch of ddr4_frame_buffer_top is
 
+    -- Attributes for HDMI AXI
+    ATTRIBUTE X_INTERFACE_INFO : STRING;
+    ATTRIBUTE X_INTERFACE_INFO of hdmi_clk: SIGNAL is "xilinx.com:signal:clock:1.0 hdmi_clk CLK";
+
+    ATTRIBUTE X_INTERFACE_PARAMETER : STRING;
+	attribute X_INTERFACE_PARAMETER of hdmi_clk : signal is "ASSOCIATED_BUSIF S_AXIS:M_AXIS, ASSOCIATED_RESET hdmi_resetn, FREQ_HZ 299970032";
+
+
     ---------------------------------------------------------------------------
     -- Signals
     ---------------------------------------------------------------------------

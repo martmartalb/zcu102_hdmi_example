@@ -126,6 +126,10 @@ set_property IOSTANDARD LVCMOS33 [get_ports TX_EN_OUT]
 #set_property IOSTANDARD LVCMOS18 [get_ports RX_I2C_EN_N_OUT]
 #set_property PACKAGE_PIN G24 [get_ports RX_I2C_EN_N_OUT]        
 
+# Switches
+set_property -dict {PACKAGE_PIN AN14 IOSTANDARD LVCMOS33} [get_ports sw_save]
+set_property -dict {PACKAGE_PIN AP14 IOSTANDARD LVCMOS33} [get_ports sw_read]
+
 #####
 ## End
 #####

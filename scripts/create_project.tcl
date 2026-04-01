@@ -580,8 +580,8 @@ move_dashboard_gadget -name {methodology_1} -row 2 -col 1
 source scripts/create_root_design.tcl
 
 # Set the absolute path to image.mem on the IP instance
-set mem_path [get_files image.mem]
-set_property -dict [list CONFIG.MEM_INIT_FILE $mem_path] [get_bd_cells bram_image_streamer_0]
+# set mem_path [get_files image.mem]
+# set_property -dict [list CONFIG.MEM_INIT_FILE $mem_path] [get_bd_cells bram_image_streamer_0]
 
 set_property REGISTERED_WITH_MANAGER "1" [get_files exdes.bd ] 
 set_property SYNTH_CHECKPOINT_MODE "Hierarchical" [get_files exdes.bd ] 
