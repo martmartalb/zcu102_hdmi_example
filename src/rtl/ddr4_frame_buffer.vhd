@@ -5,11 +5,14 @@
 --              and reads it back as an AXI Stream for HDMI TX.
 --
 -- Operation:
+--   No switch:     Passthrough mode — S_AXIS is forwarded directly to M_AXIS.
 --   sw_save = '1': Captures one frame (waits for SOF), writes to DDR starting
---                  at BASE_ADDR. After completion, waits for sw_save = '0'
---                  before allowing another capture.
---   sw_read = '1': Continuously reads the stored frame from DDR and outputs
---                  it as an AXI Stream. Loops while sw_read remains high.
+--                  at BASE_ADDR. Passthrough continues so the live image is
+--                  still visible on HDMI TX. After completion, waits for
+--                  sw_save = '0' before allowing another capture.
+--   sw_read = '1': Reads the stored frame from DDR and outputs it as an AXI
+--                  Stream on M_AXIS. Loops while sw_read remains high.
+--                  S_AXIS input is discarded (tready = '1').
 --
 -- Clock Domain Crossing:
 --   Two xpm_fifo_async FIFOs with asymmetric widths handle CDC between
@@ -216,6 +219,11 @@ architecture rtl of ddr4_frame_buffer is
     signal ro_tlast   : std_logic;
 
     ---------------------------------------------------------------------------
+    -- Internal tready for passthrough muxing
+    ---------------------------------------------------------------------------
+    signal s_axis_tready_int : std_logic;
+
+    ---------------------------------------------------------------------------
     -- Internal reset for write FIFO (active-high)
     ---------------------------------------------------------------------------
     signal wr_fifo_rst : std_logic;
@@ -396,21 +404,28 @@ begin
     -- HDMI Capture FSM (hdmi_clk domain)
     ---------------------------------------------------------------------------
 
-    -- S_AXIS_tready: accept always, except when capturing and FIFO full/busy
+    -- S_AXIS_tready: depends on mode
+    --   Passthrough (no switch): limited by M_AXIS_tready
+    --   Capture (sw_save):       limited by both FIFO and M_AXIS_tready
+    --   Read (sw_read):          always accept (discard S_AXIS)
     cap_writing <= '1' when cap_state = CAP_CAPTURING else '0';
     cap_tready  <= '0' when (cap_writing = '1' and
                              (wr_fifo_full = '1' or wr_fifo_wr_rst_busy = '1'))
                    else '1';
 
-    S_AXIS_tready <= cap_tready;
+    s_axis_tready_int <= '1' when sw_read_hdmi_sync = '1'
+                         else (cap_tready and M_AXIS_tready) when cap_writing = '1'
+                         else M_AXIS_tready;
+    S_AXIS_tready <= s_axis_tready_int;
 
     -- Write FIFO inputs
     wr_fifo_din   <= S_AXIS_tdata;
     wr_fifo_wr_en <= '1' when (cap_state = CAP_CAPTURING and
-                               S_AXIS_tvalid = '1' and cap_tready = '1' and
+                               S_AXIS_tvalid = '1' and s_axis_tready_int = '1' and
                                wr_fifo_wr_rst_busy = '0')
                      else '1' when (cap_state = CAP_WAIT_SOF and
                                     S_AXIS_tvalid = '1' and S_AXIS_tuser = '1' and
+                                    s_axis_tready_int = '1' and
                                     wr_fifo_wr_rst_busy = '0')
                      else '0';
 
@@ -432,7 +447,7 @@ begin
 
                     when CAP_WAIT_SOF =>
                         -- Wait for start-of-frame
-                        if S_AXIS_tvalid = '1' and S_AXIS_tuser = '1' then
+                        if S_AXIS_tvalid = '1' and S_AXIS_tuser = '1' and s_axis_tready_int = '1' then
                             -- First pixel written to FIFO via concurrent logic
                             cap_count <= to_unsigned(1, cap_count'length);
                             cap_state <= CAP_CAPTURING;
@@ -440,7 +455,7 @@ begin
 
                     when CAP_CAPTURING =>
                         -- Count accepted transfers
-                        if S_AXIS_tvalid = '1' and cap_tready = '1' then
+                        if S_AXIS_tvalid = '1' and s_axis_tready_int = '1' then
                             if cap_count = to_unsigned(C_AXI_XFERS_PER_FRAME - 1, cap_count'length) then
                                 cap_state <= CAP_DONE;
                             else
@@ -667,12 +682,13 @@ begin
     ro_tlast  <= '1' when (ro_x_cnt = to_unsigned(C_CLKS_PER_LINE - 1, ro_x_cnt'length))
                  else '0';
 
-    M_AXIS_tdata  <= rd_fifo_dout;
-    M_AXIS_tvalid <= ro_tvalid;
-    M_AXIS_tlast  <= ro_tlast and ro_tvalid;
-    M_AXIS_tuser  <= ro_sof and ro_tvalid;
+    -- M_AXIS mux: read playback (sw_read) vs passthrough (default)
+    M_AXIS_tdata  <= rd_fifo_dout              when sw_read_hdmi_sync = '1' else S_AXIS_tdata;
+    M_AXIS_tvalid <= ro_tvalid                 when sw_read_hdmi_sync = '1' else S_AXIS_tvalid;
+    M_AXIS_tlast  <= ro_tlast and ro_tvalid    when sw_read_hdmi_sync = '1' else S_AXIS_tlast;
+    M_AXIS_tuser  <= ro_sof   and ro_tvalid    when sw_read_hdmi_sync = '1' else S_AXIS_tuser;
 
-    -- Read FIFO pop on handshake
+    -- Read FIFO pop on handshake (only during read mode)
     rd_fifo_rd_en <= ro_tvalid and M_AXIS_tready;
 
     p_read_output_fsm : process(hdmi_clk)
