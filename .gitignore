@@ -6,3 +6,9 @@
 *.str
 vivado_project/*
 vitis_workspace/*
+
+# Test bench / modelsim
+work/*
+transcript
+modelsim.ini
+*.wlf
