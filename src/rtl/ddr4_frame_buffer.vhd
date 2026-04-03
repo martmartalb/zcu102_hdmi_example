@@ -119,7 +119,16 @@ architecture rtl of ddr4_frame_buffer is
     type cap_state_t is (CAP_IDLE, CAP_WAIT_SOF, CAP_CAPTURING, CAP_DONE);
     type mig_state_t is (M_IDLE, M_WR_PRESENT, M_WR_ADVANCE, M_WR_DONE,
                          M_RD_CMD, M_RD_DRAIN, M_RD_FRAME_DONE);
-    type ro_state_t  is (RO_IDLE, RO_ACTIVE);
+    type ro_state_t  is (RO_IDLE, RO_DRAIN, RO_ACTIVE);
+
+    ---------------------------------------------------------------------------
+    -- Switch debounce (hdmi_clk domain, ~3.3 ms at 300 MHz)
+    ---------------------------------------------------------------------------
+    constant C_DEBOUNCE_MAX : unsigned(19 downto 0) := to_unsigned(999999, 20);
+    signal sw_save_deb      : std_logic := '0';
+    signal sw_read_deb      : std_logic := '0';
+    signal sw_save_deb_cnt  : unsigned(19 downto 0) := (others => '0');
+    signal sw_read_deb_cnt  : unsigned(19 downto 0) := (others => '0');
 
     ---------------------------------------------------------------------------
     -- Switch synchronizers (2-FF) — to MIG domain
@@ -145,6 +154,12 @@ architecture rtl of ddr4_frame_buffer is
     signal capture_en_hdmi_prev : std_logic := '0';
 
     ---------------------------------------------------------------------------
+    -- rd_fifo_empty synchronizer — HDMI to MIG domain
+    ---------------------------------------------------------------------------
+    signal rd_fifo_empty_mig_meta : std_logic := '1';
+    signal rd_fifo_empty_mig_sync : std_logic := '1';
+
+    ---------------------------------------------------------------------------
     -- ASYNC_REG attributes
     ---------------------------------------------------------------------------
     attribute ASYNC_REG : string;
@@ -156,6 +171,8 @@ architecture rtl of ddr4_frame_buffer is
     attribute ASYNC_REG of sw_read_hdmi_sync   : signal is "TRUE";
     attribute ASYNC_REG of capture_en_hdmi_meta : signal is "TRUE";
     attribute ASYNC_REG of capture_en_hdmi_sync : signal is "TRUE";
+    attribute ASYNC_REG of rd_fifo_empty_mig_meta : signal is "TRUE";
+    attribute ASYNC_REG of rd_fifo_empty_mig_sync : signal is "TRUE";
 
     ---------------------------------------------------------------------------
     -- Write FIFO signals (HDMI → MIG), 48-bit write / 96-bit read
@@ -217,6 +234,7 @@ architecture rtl of ddr4_frame_buffer is
     signal ro_sof     : std_logic := '1';
     signal ro_tvalid  : std_logic;
     signal ro_tlast   : std_logic;
+    signal ro_drain_en : std_logic;
 
     ---------------------------------------------------------------------------
     -- Internal tready for passthrough muxing
@@ -233,6 +251,40 @@ begin
     wr_fifo_rst <= not hdmi_resetn;
 
     ---------------------------------------------------------------------------
+    -- Switch debounce (hdmi_clk domain)
+    ---------------------------------------------------------------------------
+    p_debounce : process(hdmi_clk)
+    begin
+        if rising_edge(hdmi_clk) then
+            if hdmi_resetn = '0' then
+                sw_save_deb     <= '0';
+                sw_read_deb     <= '0';
+                sw_save_deb_cnt <= (others => '0');
+                sw_read_deb_cnt <= (others => '0');
+            else
+                -- sw_save debounce
+                if sw_save = sw_save_deb then
+                    sw_save_deb_cnt <= (others => '0');
+                elsif sw_save_deb_cnt = C_DEBOUNCE_MAX then
+                    sw_save_deb     <= sw_save;
+                    sw_save_deb_cnt <= (others => '0');
+                else
+                    sw_save_deb_cnt <= sw_save_deb_cnt + 1;
+                end if;
+                -- sw_read debounce
+                if sw_read = sw_read_deb then
+                    sw_read_deb_cnt <= (others => '0');
+                elsif sw_read_deb_cnt = C_DEBOUNCE_MAX then
+                    sw_read_deb     <= sw_read;
+                    sw_read_deb_cnt <= (others => '0');
+                else
+                    sw_read_deb_cnt <= sw_read_deb_cnt + 1;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    ---------------------------------------------------------------------------
     -- Switch synchronizers to MIG domain
     ---------------------------------------------------------------------------
     p_sync_sw_mig : process(mig_clk)
@@ -245,10 +297,10 @@ begin
                 sw_read_mig_meta <= '0';
                 sw_read_mig_sync <= '0';
             else
-                sw_save_mig_meta <= sw_save;
+                sw_save_mig_meta <= sw_save_deb;
                 sw_save_mig_sync <= sw_save_mig_meta;
                 sw_save_mig_prev <= sw_save_mig_sync;
-                sw_read_mig_meta <= sw_read;
+                sw_read_mig_meta <= sw_read_deb;
                 sw_read_mig_sync <= sw_read_mig_meta;
             end if;
         end if;
@@ -264,8 +316,24 @@ begin
                 sw_read_hdmi_meta <= '0';
                 sw_read_hdmi_sync <= '0';
             else
-                sw_read_hdmi_meta <= sw_read;
+                sw_read_hdmi_meta <= sw_read_deb;
                 sw_read_hdmi_sync <= sw_read_hdmi_meta;
+            end if;
+        end if;
+    end process;
+
+    ---------------------------------------------------------------------------
+    -- rd_fifo_empty synchronizer: HDMI → MIG domain
+    ---------------------------------------------------------------------------
+    p_sync_rd_empty : process(mig_clk)
+    begin
+        if rising_edge(mig_clk) then
+            if mig_rst = '1' then
+                rd_fifo_empty_mig_meta <= '1';
+                rd_fifo_empty_mig_sync <= '1';
+            else
+                rd_fifo_empty_mig_meta <= rd_fifo_empty;
+                rd_fifo_empty_mig_sync <= rd_fifo_empty_mig_meta;
             end if;
         end if;
     end process;
@@ -654,15 +722,16 @@ begin
 
                     -------------------------------------------------------
                     when M_RD_FRAME_DONE =>
-                        if sw_read_mig_sync = '1' then
-                            -- Loop: read another frame
+                        if sw_read_mig_sync = '0' then
+                            mig_state <= M_IDLE;
+                        elsif rd_fifo_empty_mig_sync = '1' then
+                            -- HDMI side consumed all data; safe to loop
                             rd_addr       <= unsigned(BASE_ADDR);
                             rd_cmd_count  <= (others => '0');
                             rd_data_count <= (others => '0');
                             mig_state     <= M_RD_CMD;
-                        else
-                            mig_state <= M_IDLE;
                         end if;
+                        -- else: wait for FIFO to drain
 
                 end case;
             end if;
@@ -688,8 +757,12 @@ begin
     M_AXIS_tlast  <= ro_tlast and ro_tvalid    when sw_read_hdmi_sync = '1' else S_AXIS_tlast;
     M_AXIS_tuser  <= ro_sof   and ro_tvalid    when sw_read_hdmi_sync = '1' else S_AXIS_tuser;
 
-    -- Read FIFO pop on handshake (only during read mode)
-    rd_fifo_rd_en <= ro_tvalid and M_AXIS_tready;
+    -- Drain enable: flush stale FIFO data before playback
+    ro_drain_en <= '1' when (ro_state = RO_DRAIN and rd_fifo_empty = '0' and rd_fifo_rd_rst_busy = '0')
+                   else '0';
+
+    -- Read FIFO pop: normal handshake OR drain flush
+    rd_fifo_rd_en <= (ro_tvalid and M_AXIS_tready) or ro_drain_en;
 
     p_read_output_fsm : process(hdmi_clk)
     begin
@@ -707,6 +780,14 @@ begin
                         ro_y_cnt <= (others => '0');
                         ro_sof   <= '1';
                         if sw_read_hdmi_sync = '1' then
+                            ro_state <= RO_DRAIN;
+                        end if;
+
+                    when RO_DRAIN =>
+                        -- Discard stale FIFO data before starting playback
+                        if sw_read_hdmi_sync = '0' then
+                            ro_state <= RO_IDLE;
+                        elsif rd_fifo_empty = '1' and rd_fifo_rd_rst_busy = '0' then
                             ro_state <= RO_ACTIVE;
                         end if;
 
