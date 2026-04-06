@@ -216,8 +216,8 @@ module ddr4_frame_buffer_tb;
         $display("Time=%0t | m_axis_tready = 1 (start accepting M_AXI data)", $time);
         m_axis_tready = 1'b1;
 
-        // Wait for capture to complete (~1M AXI transfers at ~300 MHz ≈ 3.5 ms)
-        wait(wr_count == 518400);
+        // Wait for capture to complete (~1M AXI transfers at ~300 MHz ≈ 7 ms, 1:1 packing)
+        wait(wr_count == 1036800);
         $display("Time=%0t | All %0d MIG writes completed", $time, wr_count);
         $display("Time=%0t | S_AXIS: %0d transfers, %0d frames", $time, s_axis_xfer_count, s_axis_frame_count);
         $display("Time=%0t | M_AXIS: %0d transfers, %0d frames", $time, m_axis_xfer_count, m_axis_frame_count);

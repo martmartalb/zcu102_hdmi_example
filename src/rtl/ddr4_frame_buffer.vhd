@@ -18,11 +18,10 @@
 --   Two xpm_fifo_async FIFOs with asymmetric widths handle CDC between
 --   the HDMI clock domain and the MIG ui_clk domain.
 --
--- Data Packing (2:1):
---   Two 48-bit AXI words are packed into one 128-bit DDR word:
---     DDR[127:96] = 0 (padding)
---     DDR[95:48]  = AXI word 1
---     DDR[47:0]   = AXI word 0
+-- Data Packing (1:1):
+--   One 48-bit AXI word per 128-bit DDR word:
+--     DDR[127:48] = 0 (padding)
+--     DDR[47:0]   = AXI word
 --
 -- AXI Stream Video Protocol:
 --   - tuser: start-of-frame (first transfer of each frame)
@@ -107,7 +106,7 @@ architecture rtl of ddr4_frame_buffer is
     constant C_V_LINES             : integer := 1080;
     constant C_CLKS_PER_LINE       : integer := C_H_PIXELS / C_PIXELS_PER_CLK; -- 960
     constant C_AXI_XFERS_PER_FRAME : integer := C_CLKS_PER_LINE * C_V_LINES;   -- 1,036,800
-    constant C_DDR_OPS_PER_FRAME   : integer := C_AXI_XFERS_PER_FRAME / 2;     -- 518,400
+    constant C_DDR_OPS_PER_FRAME   : integer := C_AXI_XFERS_PER_FRAME;       -- 1,036,800 (1:1)
     constant C_ADDR_STEP           : unsigned(APP_ADDR_WIDTH-1 downto 0) := to_unsigned(16, APP_ADDR_WIDTH);
 
     constant CMD_WRITE : std_logic_vector(2 downto 0) := "000";
@@ -175,21 +174,21 @@ architecture rtl of ddr4_frame_buffer is
     attribute ASYNC_REG of rd_fifo_empty_mig_sync : signal is "TRUE";
 
     ---------------------------------------------------------------------------
-    -- Write FIFO signals (HDMI → MIG), 48-bit write / 96-bit read
+    -- Write FIFO signals (HDMI → MIG), 48-bit write / 48-bit read
     ---------------------------------------------------------------------------
     signal wr_fifo_din         : std_logic_vector(47 downto 0);
     signal wr_fifo_wr_en       : std_logic;
     signal wr_fifo_full        : std_logic;
     signal wr_fifo_wr_rst_busy : std_logic;
-    signal wr_fifo_dout        : std_logic_vector(95 downto 0);
+    signal wr_fifo_dout        : std_logic_vector(47 downto 0);
     signal wr_fifo_rd_en       : std_logic;
     signal wr_fifo_empty       : std_logic;
     signal wr_fifo_rd_rst_busy : std_logic;
 
     ---------------------------------------------------------------------------
-    -- Read FIFO signals (MIG → HDMI), 96-bit write / 48-bit read
+    -- Read FIFO signals (MIG → HDMI), 48-bit write / 48-bit read
     ---------------------------------------------------------------------------
-    signal rd_fifo_din         : std_logic_vector(95 downto 0);
+    signal rd_fifo_din         : std_logic_vector(47 downto 0);
     signal rd_fifo_wr_en       : std_logic;
     signal rd_fifo_full        : std_logic;
     signal rd_fifo_prog_full   : std_logic;
@@ -212,10 +211,10 @@ architecture rtl of ddr4_frame_buffer is
     ---------------------------------------------------------------------------
     signal mig_state      : mig_state_t := M_IDLE;
     signal wr_addr        : unsigned(APP_ADDR_WIDTH-1 downto 0) := (others => '0');
-    signal wr_count       : unsigned(19 downto 0) := (others => '0'); -- max 518,400
+    signal wr_count       : unsigned(20 downto 0) := (others => '0'); -- max 1,036,800
     signal rd_addr        : unsigned(APP_ADDR_WIDTH-1 downto 0) := (others => '0');
-    signal rd_cmd_count   : unsigned(19 downto 0) := (others => '0');
-    signal rd_data_count  : unsigned(19 downto 0) := (others => '0');
+    signal rd_cmd_count   : unsigned(20 downto 0) := (others => '0');
+    signal rd_data_count  : unsigned(20 downto 0) := (others => '0');
 
     -- Read FIFO flush on abort (held for several cycles)
     signal rd_fifo_flush    : std_logic := '0';
@@ -363,14 +362,14 @@ begin
     end process;
 
     ---------------------------------------------------------------------------
-    -- Write FIFO: xpm_fifo_async (48-bit write, 96-bit read, FWFT)
+    -- Write FIFO: xpm_fifo_async (48-bit write, 48-bit read, FWFT)
     ---------------------------------------------------------------------------
     u_wr_fifo : xpm_fifo_async
     generic map (
         FIFO_MEMORY_TYPE    => "block",
         FIFO_WRITE_DEPTH    => 1024,
         WRITE_DATA_WIDTH    => 48,
-        READ_DATA_WIDTH     => 96,
+        READ_DATA_WIDTH     => 48,
         READ_MODE           => "fwft",
         FIFO_READ_LATENCY   => 0,
         CDC_SYNC_STAGES     => 2,
@@ -419,13 +418,13 @@ begin
     );
 
     ---------------------------------------------------------------------------
-    -- Read FIFO: xpm_fifo_async (96-bit write, 48-bit read, FWFT)
+    -- Read FIFO: xpm_fifo_async (48-bit write, 48-bit read, FWFT)
     ---------------------------------------------------------------------------
     u_rd_fifo : xpm_fifo_async
     generic map (
         FIFO_MEMORY_TYPE    => "block",
         FIFO_WRITE_DEPTH    => 512,
-        WRITE_DATA_WIDTH    => 96,
+        WRITE_DATA_WIDTH    => 48,
         READ_DATA_WIDTH     => 48,
         READ_MODE           => "fwft",
         FIFO_READ_LATENCY   => 0,
@@ -597,7 +596,7 @@ begin
                    app_rd_data_valid = '1' and rd_fifo_wr_rst_busy = '0' and
                    rd_data_count < to_unsigned(C_DDR_OPS_PER_FRAME, rd_data_count'length) then
                     rd_fifo_wr_en <= '1';
-                    rd_fifo_din   <= app_rd_data(95 downto 0);
+                    rd_fifo_din   <= app_rd_data(47 downto 0);
                     rd_data_count <= rd_data_count + 1;
                 end if;
 
@@ -659,7 +658,7 @@ begin
                                 app_cmd_r      <= CMD_WRITE;
                                 app_addr_r     <= std_logic_vector(wr_addr);
                                 app_en_r       <= '1';
-                                app_wdf_data_r <= x"00000000" & wr_fifo_dout;
+                                app_wdf_data_r <= x"0000000000000000" & x"0000" & wr_fifo_dout;
                                 app_wdf_wren_r <= '1';
                                 app_wdf_end_r  <= '1';
                             end if;
