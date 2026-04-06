@@ -118,7 +118,7 @@ architecture rtl of ddr4_frame_buffer is
     ---------------------------------------------------------------------------
     type cap_state_t is (CAP_IDLE, CAP_WAIT_SOF, CAP_CAPTURING, CAP_DONE);
     type mig_state_t is (M_IDLE, M_WR_PRESENT, M_WR_ADVANCE, M_WR_DONE,
-                         M_RD_CMD, M_RD_DRAIN, M_RD_FRAME_DONE);
+                         M_RD_CMD, M_RD_DRAIN, M_RD_FRAME_DONE, M_RD_ABORT);
     type ro_state_t  is (RO_IDLE, RO_DRAIN, RO_ACTIVE);
 
     ---------------------------------------------------------------------------
@@ -217,6 +217,11 @@ architecture rtl of ddr4_frame_buffer is
     signal rd_cmd_count   : unsigned(19 downto 0) := (others => '0');
     signal rd_data_count  : unsigned(19 downto 0) := (others => '0');
 
+    -- Read FIFO flush on abort (held for several cycles)
+    signal rd_fifo_flush    : std_logic := '0';
+    signal rd_fifo_flush_cnt: unsigned(3 downto 0) := (others => '0');
+    signal rd_fifo_rst_int  : std_logic;
+
     -- Registered MIG outputs
     signal app_addr_r     : std_logic_vector(APP_ADDR_WIDTH-1 downto 0) := (others => '0');
     signal app_cmd_r      : std_logic_vector(2 downto 0) := (others => '0');
@@ -248,7 +253,8 @@ architecture rtl of ddr4_frame_buffer is
 
 begin
 
-    wr_fifo_rst <= not hdmi_resetn;
+    wr_fifo_rst    <= not hdmi_resetn;
+    rd_fifo_rst_int <= mig_rst or rd_fifo_flush;
 
     ---------------------------------------------------------------------------
     -- Switch debounce (hdmi_clk domain)
@@ -438,7 +444,7 @@ begin
         DOUT_RESET_VALUE    => "0"
     )
     port map (
-        rst           => mig_rst,
+        rst           => rd_fifo_rst_int,
         wr_clk        => mig_clk,
         wr_en         => rd_fifo_wr_en,
         din           => rd_fifo_din,
@@ -572,8 +578,10 @@ begin
                 app_wdf_data_r <= (others => '0');
                 app_wdf_wren_r <= '0';
                 app_wdf_end_r  <= '0';
-                wr_fifo_rd_en  <= '0';
-                rd_fifo_wr_en  <= '0';
+                wr_fifo_rd_en     <= '0';
+                rd_fifo_wr_en     <= '0';
+                rd_fifo_flush     <= '0';
+                rd_fifo_flush_cnt <= (others => '0');
                 rd_fifo_din    <= (others => '0');
             else
                 -- Defaults: deassert single-cycle pulses
@@ -678,9 +686,16 @@ begin
                     -- Read: issue DDR read commands, pipelined.
                     -- Hold app_en until accepted, then update address for
                     -- next command. Throttled by prog_full on read FIFO.
+                    -- Abort to M_RD_ABORT if sw_read goes low.
                     -------------------------------------------------------
                     when M_RD_CMD =>
-                        if app_en_r = '1' then
+                        if sw_read_mig_sync = '0' then
+                            -- Abort: stop issuing, flush FIFO
+                            app_en_r          <= '0';
+                            rd_fifo_flush     <= '1';
+                            rd_fifo_flush_cnt <= (others => '0');
+                            mig_state         <= M_RD_ABORT;
+                        elsif app_en_r = '1' then
                             -- Command in flight: wait for acceptance
                             if app_rdy = '1' then
                                 rd_cmd_count <= rd_cmd_count + 1;
@@ -715,8 +730,13 @@ begin
                     -------------------------------------------------------
                     when M_RD_DRAIN =>
                         app_en_r <= '0';
-                        -- Wait for all read data to arrive
-                        if rd_data_count = to_unsigned(C_DDR_OPS_PER_FRAME, rd_data_count'length) then
+                        if sw_read_mig_sync = '0' then
+                            -- Abort: flush FIFO
+                            rd_fifo_flush     <= '1';
+                            rd_fifo_flush_cnt <= (others => '0');
+                            mig_state         <= M_RD_ABORT;
+                        elsif rd_data_count = to_unsigned(C_DDR_OPS_PER_FRAME, rd_data_count'length) then
+                            -- All read data arrived
                             mig_state <= M_RD_FRAME_DONE;
                         end if;
 
@@ -732,6 +752,21 @@ begin
                             mig_state     <= M_RD_CMD;
                         end if;
                         -- else: wait for FIFO to drain
+
+                    -------------------------------------------------------
+                    -- Abort: hold read FIFO reset for several cycles,
+                    -- then return to idle.
+                    -------------------------------------------------------
+                    when M_RD_ABORT =>
+                        app_en_r       <= '0';
+                        app_wdf_wren_r <= '0';
+                        app_wdf_end_r  <= '0';
+                        if rd_fifo_flush_cnt = to_unsigned(15, rd_fifo_flush_cnt'length) then
+                            rd_fifo_flush <= '0';
+                            mig_state     <= M_IDLE;
+                        else
+                            rd_fifo_flush_cnt <= rd_fifo_flush_cnt + 1;
+                        end if;
 
                 end case;
             end if;
