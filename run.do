@@ -51,7 +51,34 @@ vsim -voptargs=+acc \
 # ============================================================
 log -r /*
 
-# Clock / reset
-add wave /*
+# Clock / reset / switches
+
+add wave /ddr4_frame_buffer_tb/hdmi_clk
+add wave /ddr4_frame_buffer_tb/mig_clk
+add wave /ddr4_frame_buffer_tb/hdmi_resetn
+add wave /ddr4_frame_buffer_tb/mig_rst
+add wave /ddr4_frame_buffer_tb/init_calib_complete
+add wave /ddr4_frame_buffer_tb/sw_save
+
+# AXI Stream
+add wave -radix hexadecimal /ddr4_frame_buffer_tb/s_axis_tdata
+add wave /ddr4_frame_buffer_tb/s_axis_tvalid
+add wave /ddr4_frame_buffer_tb/s_axis_tlast
+add wave /ddr4_frame_buffer_tb/s_axis_tuser
+add wave /ddr4_frame_buffer_tb/s_axis_tready
+
+# MIG interface
+add wave /ddr4_frame_buffer_tb/app_addr
+add wave /ddr4_frame_buffer_tb/app_cmd
+add wave /ddr4_frame_buffer_tb/app_en
+add wave -radix hexadecimal /ddr4_frame_buffer_tb/app_wdf_data
+add wave /ddr4_frame_buffer_tb/app_wdf_end
+add wave /ddr4_frame_buffer_tb/app_wdf_wren
+add wave /ddr4_frame_buffer_tb/app_rdy
+add wave /ddr4_frame_buffer_tb/app_wdf_rdy
+
+# Debug
+add wave /ddr4_frame_buffer_tb/wr_count
+
 
 run -all
