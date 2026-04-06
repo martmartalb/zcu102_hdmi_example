@@ -12,14 +12,21 @@ vlib work
 vmap work work
 
 # ============================================================
-# Map precompiled UVM library (optional)
+# Map libraries
 # ============================================================
 vmap uvm_lib /opt/fpga/uvm-1.2/uvm_lib
+vmap xpm ./simlib/xpm
 
 # ============================================================
 # Compile DUT (VHDL)
 # ============================================================
 vcom src/rtl/bram_image_streamer.vhd
+vcom src/rtl/ddr4_frame_buffer.vhd
+
+# ============================================================
+# Compile additional sources
+# ============================================================
+vlog /opt/fpga/amd/2025.2/data/verilog/src/glbl.v
 
 # ============================================================
 # Compile Testbench (SystemVerilog)
@@ -28,7 +35,7 @@ vlog -sv \
      -L uvm_lib \
      +incdir+src/tb \
      +incdir+/opt/fpga/uvm-1.2/src \
-     src/tb/bram_image_streamer_tb.sv
+     src/tb/ddr4_frame_buffer_tb.sv
 
 # ============================================================
 # Simulate
@@ -36,7 +43,8 @@ vlog -sv \
 vsim -voptargs=+acc \
      -L uvm_lib \
      -dpicpppath /usr/bin/gcc \
-     work.bram_image_streamer_tb
+     work.ddr4_frame_buffer_tb \
+     work.glbl
 
 # ============================================================
 # Wave + Log
@@ -44,14 +52,6 @@ vsim -voptargs=+acc \
 log -r /*
 
 # Clock / reset
-add wave /bram_image_streamer_tb/aclk
-add wave /bram_image_streamer_tb/aresetn
-
-# AXI Stream
-add wave /bram_image_streamer_tb/tvalid
-add wave /bram_image_streamer_tb/tready
-add wave /bram_image_streamer_tb/tdata
-add wave /bram_image_streamer_tb/tlast
-add wave /bram_image_streamer_tb/tuser
+add wave /*
 
 run -all

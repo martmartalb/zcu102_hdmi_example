@@ -77,7 +77,7 @@ module ddr4_frame_buffer_tb;
     // ---------------------------------------------------------------
     // TX sink: always accept M_AXIS data (simulates HDMI TX)
     // ---------------------------------------------------------------
-    assign m_axis_tready = 1'b1;
+    // assign m_axis_tready = 1'b1;
 
     // ---------------------------------------------------------------
     // DUT: bram_image_streamer (AXI Stream source)
@@ -192,6 +192,7 @@ module ddr4_frame_buffer_tb;
         init_calib_complete = 0;
         sw_save             = 0;
         sw_read             = 0;
+        m_axis_tready       = 1'b0; // reject M_AXI data at the begining
 
         // Assert resets for 100 ns
         #100;
@@ -209,6 +210,11 @@ module ddr4_frame_buffer_tb;
         // Start save: sw_save ON
         sw_save = 1;
         $display("Time=%0t | sw_save = 1 (start capture)", $time);
+        #50
+
+        // Start accepting M_AXI data
+        $display("Time=%0t | m_axis_tready = 1 (start accepting M_AXI data)", $time);
+        m_axis_tready = 1'b1;
 
         // Wait for capture to complete (~1M AXI transfers at ~300 MHz ≈ 3.5 ms)
         wait(wr_count == 518400);
