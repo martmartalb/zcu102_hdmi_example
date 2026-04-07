@@ -60,18 +60,20 @@ add wave /ddr4_frame_buffer_tb/mig_rst
 add wave /ddr4_frame_buffer_tb/init_calib_complete
 add wave /ddr4_frame_buffer_tb/sw_save
 
-# AXI Stream
-add wave -radix hexadecimal /ddr4_frame_buffer_tb/s_axis_tdata
-add wave /ddr4_frame_buffer_tb/s_axis_tvalid
-add wave /ddr4_frame_buffer_tb/s_axis_tlast
 add wave /ddr4_frame_buffer_tb/s_axis_tuser
-add wave /ddr4_frame_buffer_tb/s_axis_tready
+add wave -radix hexadecimal /ddr4_frame_buffer_tb/s_axis_tdata
+add wave -radix hexadecimal /ddr4_frame_buffer_tb/app_wdf_data
+add wave -radix hexadecimal /ddr4_frame_buffer_tb/app_addr
+add wave -radix hexadecimal /ddr4_frame_buffer_tb/u_dut/wr_fifo_din
+add wave -radix ufixed /ddr4_frame_buffer_tb/u_dut/cap_count
+add wave /ddr4_frame_buffer_tb/u_dut/wr_fifo_wr_en
+add wave /ddr4_frame_buffer_tb/u_dut/wr_fifo_almost_full
+add wave -radix hexadecimal /ddr4_frame_buffer_tb/u_dut/wr_fifo_dout
+add wave  /ddr4_frame_buffer_tb/u_dut/mig_state
 
-# MIG interface
-add wave /ddr4_frame_buffer_tb/app_addr
+
 add wave /ddr4_frame_buffer_tb/app_cmd
 add wave /ddr4_frame_buffer_tb/app_en
-add wave -radix hexadecimal /ddr4_frame_buffer_tb/app_wdf_data
 add wave /ddr4_frame_buffer_tb/app_wdf_end
 add wave /ddr4_frame_buffer_tb/app_wdf_wren
 add wave /ddr4_frame_buffer_tb/app_rdy
