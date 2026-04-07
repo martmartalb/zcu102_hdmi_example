@@ -21,9 +21,8 @@ module ddr4_frame_buffer_tb;
     // ---------------------------------------------------------------
     // Resets
     // ---------------------------------------------------------------
-    logic hdmi_resetn        = 0;
-    logic mig_rst            = 1;
-    logic init_calib_complete = 0;
+    logic hdmi_resetn = 0;
+    logic mig_rst     = 1;
 
     // ---------------------------------------------------------------
     // Switches
@@ -64,20 +63,7 @@ module ddr4_frame_buffer_tb;
     logic [APP_DATA_WIDTH-1:0] app_rd_data;
     logic                      app_rd_data_valid;
     logic                      app_rd_data_end;
-
-    // ---------------------------------------------------------------
-    // Simple MIG model: always ready, no read data for now
-    // ---------------------------------------------------------------
-    assign app_rdy           = 1'b1;
-    assign app_wdf_rdy       = 1'b1;
-    assign app_rd_data       = '0;
-    assign app_rd_data_valid = 1'b0;
-    assign app_rd_data_end   = 1'b0;
-
-    // ---------------------------------------------------------------
-    // TX sink: always accept M_AXIS data (simulates HDMI TX)
-    // ---------------------------------------------------------------
-    // assign m_axis_tready = 1'b1;
+    logic                      init_calib_complete;
 
     // ---------------------------------------------------------------
     // DUT: bram_image_streamer (AXI Stream source)
@@ -92,6 +78,35 @@ module ddr4_frame_buffer_tb;
         .VIDEO_OUT_tlast  (s_axis_tlast),
         .VIDEO_OUT_tuser  (s_axis_tuser),
         .VIDEO_OUT_tready (s_axis_tready)
+    );
+
+    // ---------------------------------------------------------------
+    // MIG model
+    // ---------------------------------------------------------------
+    mig_model #(
+        .APP_ADDR_WIDTH (APP_ADDR_WIDTH),
+        .APP_DATA_WIDTH (APP_DATA_WIDTH),
+        .APP_MASK_WIDTH (APP_MASK_WIDTH),
+        .MEM_INIT_FILE  ("src/data/image.mem"),
+        .MEM_INIT_DEPTH (131072),
+        .MEM_DEPTH      (1_036_800),
+        .RD_LATENCY     (8)
+    ) u_mig (
+        .clk                (mig_clk),
+        .rst                (mig_rst),
+        .init_calib_complete(init_calib_complete),
+        .app_addr           (app_addr),
+        .app_cmd            (app_cmd),
+        .app_en             (app_en),
+        .app_rdy            (app_rdy),
+        .app_wdf_data       (app_wdf_data),
+        .app_wdf_end        (app_wdf_end),
+        .app_wdf_mask       (app_wdf_mask),
+        .app_wdf_wren       (app_wdf_wren),
+        .app_wdf_rdy        (app_wdf_rdy),
+        .app_rd_data        (app_rd_data),
+        .app_rd_data_valid  (app_rd_data_valid),
+        .app_rd_data_end    (app_rd_data_end)
     );
 
     // ---------------------------------------------------------------
@@ -166,9 +181,10 @@ module ddr4_frame_buffer_tb;
         end
     end
 
+    // M_AXIS tready pattern: 1 cycle on, 3 cycles off (simulates TX backpressure)
     initial begin
         m_axis_tready = 0;
-        #500
+        #500;
         forever begin
             @(posedge hdmi_clk);
             m_axis_tready = 1;
@@ -201,11 +217,10 @@ module ddr4_frame_buffer_tb;
         $display("=== ddr4_frame_buffer_tb START ===");
 
         // Hold resets
-        hdmi_resetn         = 0;
-        mig_rst             = 1;
-        init_calib_complete = 0;
-        sw_save             = 0;
-        sw_read             = 0;
+        hdmi_resetn = 0;
+        mig_rst     = 1;
+        sw_save     = 0;
+        sw_read     = 0;
 
         // Assert resets for 100 ns
         #100;
@@ -213,28 +228,41 @@ module ddr4_frame_buffer_tb;
         // Deassert resets
         hdmi_resetn = 1;
         mig_rst     = 0;
-        #50;
+        $display("Time=%0t | Resets deasserted", $time);
 
-        // MIG calibration done
-        init_calib_complete = 1;
+        // Wait for MIG calibration (handled by mig_model)
+        wait(init_calib_complete);
         $display("Time=%0t | init_calib_complete asserted", $time);
         #50;
 
         // Start save: sw_save ON
         sw_save = 1;
         $display("Time=%0t | sw_save = 1 (start capture)", $time);
-        #50
+        #50;
 
-        // Wait for capture to complete (~1M AXI transfers at ~300 MHz ≈ 7 ms, 1:1 packing)
+        // Wait for capture to complete
         wait(wr_count == 1036800);
         $display("Time=%0t | All %0d MIG writes completed", $time, wr_count);
         $display("Time=%0t | S_AXIS: %0d transfers, %0d frames", $time, s_axis_xfer_count, s_axis_frame_count);
         $display("Time=%0t | M_AXIS: %0d transfers, %0d frames", $time, m_axis_xfer_count, m_axis_frame_count);
 
-        // Wait a bit, then release sw_save
+        // Release sw_save
         #200;
         sw_save = 0;
         $display("Time=%0t | sw_save = 0", $time);
+        #1000;
+
+        // Now test read playback
+        $display("Time=%0t | sw_read = 1 (start read playback)", $time);
+        sw_read = 1;
+
+        // Reset M_AXIS counter to track the read frame
+        @(posedge hdmi_clk);
+        m_axis_xfer_count = 0;
+        m_axis_frame_count = 0;
+
+        wait(m_axis_xfer_count >= 1036800);
+        $display("Time=%0t | Read playback: %0d M_AXIS transfers, %0d frames", $time, m_axis_xfer_count, m_axis_frame_count);
 
         #20000;
         $display("=== ddr4_frame_buffer_tb DONE ===");
