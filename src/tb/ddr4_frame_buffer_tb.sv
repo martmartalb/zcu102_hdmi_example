@@ -15,8 +15,8 @@ module ddr4_frame_buffer_tb;
     logic hdmi_clk = 0;
     logic mig_clk  = 0;
 
-    always #1.667 hdmi_clk = ~hdmi_clk;  // ~300 MHz
-    always #1.666 mig_clk  = ~mig_clk;   // ~300 MHz (slightly different)
+    always #5 hdmi_clk = ~hdmi_clk;  // ~300 MHz
+    always #5.1 mig_clk  = ~mig_clk;   // ~300 MHz (slightly different)
 
     // ---------------------------------------------------------------
     // Resets
@@ -166,6 +166,20 @@ module ddr4_frame_buffer_tb;
         end
     end
 
+    initial begin
+        m_axis_tready = 0;
+        #500
+        forever begin
+            @(posedge hdmi_clk);
+            m_axis_tready = 1;
+
+            repeat (3) begin
+                @(posedge hdmi_clk);
+                m_axis_tready = 0;
+            end
+        end
+    end
+
     // ---------------------------------------------------------------
     // S_AXIS monitors (HDMI domain)
     // ---------------------------------------------------------------
@@ -192,7 +206,6 @@ module ddr4_frame_buffer_tb;
         init_calib_complete = 0;
         sw_save             = 0;
         sw_read             = 0;
-        m_axis_tready       = 1'b0; // reject M_AXI data at the begining
 
         // Assert resets for 100 ns
         #100;
@@ -212,10 +225,6 @@ module ddr4_frame_buffer_tb;
         $display("Time=%0t | sw_save = 1 (start capture)", $time);
         #50
 
-        // Start accepting M_AXI data
-        $display("Time=%0t | m_axis_tready = 1 (start accepting M_AXI data)", $time);
-        m_axis_tready = 1'b1;
-
         // Wait for capture to complete (~1M AXI transfers at ~300 MHz ≈ 7 ms, 1:1 packing)
         wait(wr_count == 1036800);
         $display("Time=%0t | All %0d MIG writes completed", $time, wr_count);
@@ -227,7 +236,7 @@ module ddr4_frame_buffer_tb;
         sw_save = 0;
         $display("Time=%0t | sw_save = 0", $time);
 
-        #500;
+        #20000;
         $display("=== ddr4_frame_buffer_tb DONE ===");
         $finish;
     end

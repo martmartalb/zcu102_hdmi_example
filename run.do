@@ -67,7 +67,6 @@ add wave -radix hexadecimal /ddr4_frame_buffer_tb/app_addr
 add wave -radix hexadecimal /ddr4_frame_buffer_tb/u_dut/wr_fifo_din
 add wave -radix ufixed /ddr4_frame_buffer_tb/u_dut/cap_count
 add wave /ddr4_frame_buffer_tb/u_dut/wr_fifo_wr_en
-add wave /ddr4_frame_buffer_tb/u_dut/wr_fifo_almost_full
 add wave -radix hexadecimal /ddr4_frame_buffer_tb/u_dut/wr_fifo_dout
 add wave  /ddr4_frame_buffer_tb/u_dut/mig_state
 
