@@ -121,15 +121,6 @@ architecture rtl of ddr4_frame_buffer is
     type ro_state_t  is (RO_IDLE, RO_DRAIN, RO_ACTIVE);
 
     ---------------------------------------------------------------------------
-    -- Switch debounce (hdmi_clk domain, ~3.3 ms at 300 MHz)
-    ---------------------------------------------------------------------------
-    constant C_DEBOUNCE_MAX : unsigned(19 downto 0) := to_unsigned(999999, 20);
-    signal sw_save_deb      : std_logic := '0';
-    signal sw_read_deb      : std_logic := '0';
-    signal sw_save_deb_cnt  : unsigned(19 downto 0) := (others => '0');
-    signal sw_read_deb_cnt  : unsigned(19 downto 0) := (others => '0');
-
-    ---------------------------------------------------------------------------
     -- Switch synchronizers (2-FF) — to MIG domain
     ---------------------------------------------------------------------------
     signal sw_save_mig_meta : std_logic := '0';
@@ -254,40 +245,6 @@ begin
     rd_fifo_rst_int <= mig_rst or rd_fifo_flush;
 
     ---------------------------------------------------------------------------
-    -- Switch debounce (hdmi_clk domain)
-    ---------------------------------------------------------------------------
-    p_debounce : process(hdmi_clk)
-    begin
-        if rising_edge(hdmi_clk) then
-            if hdmi_resetn = '0' then
-                sw_save_deb     <= '0';
-                sw_read_deb     <= '0';
-                sw_save_deb_cnt <= (others => '0');
-                sw_read_deb_cnt <= (others => '0');
-            else
-                -- sw_save debounce
-                if sw_save = sw_save_deb then
-                    sw_save_deb_cnt <= (others => '0');
-                elsif sw_save_deb_cnt = C_DEBOUNCE_MAX then
-                    sw_save_deb     <= sw_save;
-                    sw_save_deb_cnt <= (others => '0');
-                else
-                    sw_save_deb_cnt <= sw_save_deb_cnt + 1;
-                end if;
-                -- sw_read debounce
-                if sw_read = sw_read_deb then
-                    sw_read_deb_cnt <= (others => '0');
-                elsif sw_read_deb_cnt = C_DEBOUNCE_MAX then
-                    sw_read_deb     <= sw_read;
-                    sw_read_deb_cnt <= (others => '0');
-                else
-                    sw_read_deb_cnt <= sw_read_deb_cnt + 1;
-                end if;
-            end if;
-        end if;
-    end process;
-
-    ---------------------------------------------------------------------------
     -- Switch synchronizers to MIG domain
     ---------------------------------------------------------------------------
     p_sync_sw_mig : process(mig_clk)
@@ -300,10 +257,10 @@ begin
                 sw_read_mig_meta <= '0';
                 sw_read_mig_sync <= '0';
             else
-                sw_save_mig_meta <= sw_save_deb;
+                sw_save_mig_meta <= sw_save;
                 sw_save_mig_sync <= sw_save_mig_meta;
                 sw_save_mig_prev <= sw_save_mig_sync;
-                sw_read_mig_meta <= sw_read_deb;
+                sw_read_mig_meta <= sw_read;
                 sw_read_mig_sync <= sw_read_mig_meta;
             end if;
         end if;
@@ -319,7 +276,7 @@ begin
                 sw_read_hdmi_meta <= '0';
                 sw_read_hdmi_sync <= '0';
             else
-                sw_read_hdmi_meta <= sw_read_deb;
+                sw_read_hdmi_meta <= sw_read;
                 sw_read_hdmi_sync <= sw_read_hdmi_meta;
             end if;
         end if;
