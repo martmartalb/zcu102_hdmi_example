@@ -88,7 +88,7 @@ module ddr4_frame_buffer_tb;
         .APP_DATA_WIDTH (APP_DATA_WIDTH),
         .APP_MASK_WIDTH (APP_MASK_WIDTH),
         .MEM_INIT_FILE  ("src/data/image.mem"),
-        .MEM_INIT_DEPTH (131072),
+        .MEM_INIT_DEPTH (1_036_800),
         .MEM_DEPTH      (1_036_800),
         .RD_LATENCY     (8)
     ) u_mig (
@@ -181,6 +181,36 @@ module ddr4_frame_buffer_tb;
         end
     end
 
+    // ---------------------------------------------------------------
+    // Golden reference for read-back verification
+    // ---------------------------------------------------------------
+    logic [47:0] golden_mem [0:1036799];
+    initial begin
+        for (int i = 0; i < 1036800; i++)
+            golden_mem[i] = 48'h0;
+        $readmemh("src/data/image.mem", golden_mem, 0, 1036799);
+    end
+
+    // ---------------------------------------------------------------
+    // Data integrity checker during read playback
+    // ---------------------------------------------------------------
+    int  rd_check_idx      = 0;
+    int  rd_mismatch_count = 0;
+    bit  rd_checking       = 0;
+
+    always @(posedge hdmi_clk) begin
+        if (rd_checking && m_axis_tvalid && m_axis_tready) begin
+            if (m_axis_tdata !== golden_mem[rd_check_idx]) begin
+                if (rd_mismatch_count < 20) begin
+                    $display("MISMATCH @ idx=%0d : got=0x%h  exp=0x%h",
+                             rd_check_idx, m_axis_tdata, golden_mem[rd_check_idx]);
+                end
+                rd_mismatch_count++;
+            end
+            rd_check_idx++;
+        end
+    end
+
     // M_AXIS tready pattern: 1 cycle on, 3 cycles off (simulates TX backpressure)
     initial begin
         m_axis_tready = 0;
@@ -207,6 +237,32 @@ module ddr4_frame_buffer_tb;
             s_axis_xfer_count++;
             if (s_axis_tuser)
                 s_axis_frame_count++;
+        end
+    end
+
+    // ---------------------------------------------------------------
+    // AXI Stream protocol checker during read playback
+    // ---------------------------------------------------------------
+    int rd_proto_xfer   = 0;   // transfer index within frame
+    bit rd_proto_active = 0;
+
+    always @(posedge hdmi_clk) begin
+        if (rd_proto_active && m_axis_tvalid && m_axis_tready) begin
+            // Check tuser: should only be asserted on first transfer of frame
+            if (rd_proto_xfer == 0 && !m_axis_tuser)
+                $display("PROTO_ERR @ xfer=%0d : tuser expected HIGH (SOF)", rd_proto_xfer);
+            if (rd_proto_xfer != 0 && m_axis_tuser)
+                $display("PROTO_ERR @ xfer=%0d : tuser expected LOW (not SOF)", rd_proto_xfer);
+
+            // Check tlast: should be asserted every 960 transfers (end of line)
+            if ((rd_proto_xfer % 960) == 959 && !m_axis_tlast)
+                $display("PROTO_ERR @ xfer=%0d : tlast expected HIGH (EOL)", rd_proto_xfer);
+            if ((rd_proto_xfer % 960) != 959 && m_axis_tlast)
+                $display("PROTO_ERR @ xfer=%0d : tlast expected LOW (not EOL)", rd_proto_xfer);
+
+            rd_proto_xfer++;
+            if (rd_proto_xfer == 1036800)
+                rd_proto_xfer = 0;  // wrap for next frame
         end
     end
 
@@ -256,13 +312,25 @@ module ddr4_frame_buffer_tb;
         $display("Time=%0t | sw_read = 1 (start read playback)", $time);
         sw_read = 1;
 
-        // Reset M_AXIS counter to track the read frame
+        // Reset M_AXIS counter and enable checkers
         @(posedge hdmi_clk);
         m_axis_xfer_count = 0;
         m_axis_frame_count = 0;
+        rd_check_idx      = 0;
+        rd_mismatch_count = 0;
+        rd_checking       = 1;
+        rd_proto_xfer     = 0;
+        rd_proto_active   = 1;
 
         wait(m_axis_xfer_count >= 1036800);
+        rd_checking = 0;
         $display("Time=%0t | Read playback: %0d M_AXIS transfers, %0d frames", $time, m_axis_xfer_count, m_axis_frame_count);
+        $display("Time=%0t | Data mismatches: %0d / %0d", $time, rd_mismatch_count, rd_check_idx);
+
+        if (rd_mismatch_count == 0)
+            $display("PASS: Read-back data matches golden reference.");
+        else
+            $display("FAIL: %0d mismatches detected.", rd_mismatch_count);
 
         #20000;
         $display("=== ddr4_frame_buffer_tb DONE ===");
