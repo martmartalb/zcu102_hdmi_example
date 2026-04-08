@@ -112,13 +112,15 @@ architecture rtl of ddr4_frame_buffer is
     constant CMD_WRITE : std_logic_vector(2 downto 0) := "000";
     constant CMD_READ  : std_logic_vector(2 downto 0) := "001";
 
+    constant C_TLAST_HOLD_CYCLES : natural := 20;
+
     ---------------------------------------------------------------------------
     -- FSM state types
     ---------------------------------------------------------------------------
     type cap_state_t is (CAP_IDLE, CAP_WAIT_SOF, CAP_CAPTURING, CAP_DONE);
     type mig_state_t is (M_IDLE, M_WR_PRESENT, M_WR_ADVANCE, M_WR_DONE,
                          M_RD_CMD, M_RD_DRAIN, M_RD_FRAME_DONE, M_RD_ABORT);
-    type ro_state_t  is (RO_IDLE, RO_ACTIVE);
+    type ro_state_t  is (RO_IDLE, RO_WAIT_READY, RO_ADVANCE, RO_EOL_HOLD);
 
     ---------------------------------------------------------------------------
     -- Switch synchronizers (2-FF) — to MIG domain
@@ -222,12 +224,13 @@ architecture rtl of ddr4_frame_buffer is
     -- HDMI Read Output FSM signals
     ---------------------------------------------------------------------------
     signal ro_state   : ro_state_t := RO_IDLE;
-    signal ro_x_cnt   : unsigned(9 downto 0)  := (others => '0'); -- 0..959
-    signal ro_y_cnt   : unsigned(10 downto 0) := (others => '0'); -- 0..1079
-    signal ro_sof     : std_logic := '1';
-    signal ro_tvalid  : std_logic;
-    signal ro_tlast   : std_logic;
-    signal ro_popped   : std_logic := '0'; -- '1' for 1 cycle after FIFO pop
+    signal ro_x_cnt          : unsigned(15 downto 0);
+    signal ro_y_cnt          : unsigned(15 downto 0);
+    signal ro_tvalid         : std_logic;
+    signal ro_tlast          : std_logic;
+    signal ro_tuser          : std_logic;
+    signal ro_sof_pending    : std_logic;
+    signal ro_tlast_cnt      : unsigned(7 downto 0);
 
     ---------------------------------------------------------------------------
     -- Internal tready for passthrough muxing
@@ -617,7 +620,7 @@ begin
                                 app_cmd_r      <= CMD_WRITE;
                                 app_addr_r     <= std_logic_vector(wr_addr);
                                 app_en_r       <= '1';
-                                app_wdf_data_r <= x"0000000000000000" & x"0000" & wr_fifo_dout;
+                                app_wdf_data_r <= x"00000000000000000000" & wr_fifo_dout;
                                 app_wdf_wren_r <= '1';
                                 app_wdf_end_r  <= '1';
                             end if;
@@ -741,90 +744,147 @@ begin
     ---------------------------------------------------------------------------
 
     -- M_AXIS mux: read playback (sw_read) vs passthrough (default)
-    M_AXIS_tdata  <= rd_fifo_dout              when sw_read_hdmi_sync = '1' else S_AXIS_tdata;
-    M_AXIS_tvalid <= ro_tvalid                 when sw_read_hdmi_sync = '1' else S_AXIS_tvalid;
-    M_AXIS_tlast  <= ro_tlast and ro_tvalid    when sw_read_hdmi_sync = '1' else S_AXIS_tlast;
-    M_AXIS_tuser  <= ro_sof   and ro_tvalid    when sw_read_hdmi_sync = '1' else S_AXIS_tuser;
+    M_AXIS_tdata  <= rd_fifo_dout  when sw_read_hdmi_sync = '1' else S_AXIS_tdata;
+    M_AXIS_tvalid <= ro_tvalid     when sw_read_hdmi_sync = '1' else S_AXIS_tvalid;
+    M_AXIS_tlast  <= ro_tlast      when sw_read_hdmi_sync = '1' else S_AXIS_tlast;
+    M_AXIS_tuser  <= ro_tuser      when sw_read_hdmi_sync = '1' else S_AXIS_tuser;
+
 
     p_read_output_fsm : process(hdmi_clk)
     begin
         if rising_edge(hdmi_clk) then
             if hdmi_resetn = '0' then
-                ro_state      <= RO_IDLE;
-                ro_x_cnt      <= (others => '0');
-                ro_y_cnt      <= (others => '0');
-                ro_sof        <= '1';
-                ro_tvalid     <= '0';
-                ro_tlast      <= '0';
-                rd_fifo_rd_en <= '0';
-                ro_popped     <= '0';
-            else
-                -- Defaults
-                rd_fifo_rd_en <= '0';
+                ro_state       <= RO_IDLE;
+                ro_x_cnt       <= (others => '0');
+                ro_y_cnt       <= (others => '0');
+                ro_tvalid      <= '0';
+                ro_tlast       <= '0';
+                ro_tuser       <= '0';
+                ro_sof_pending <= '1';
+                ro_tlast_cnt   <= (others => '0');
+                rd_fifo_rd_en  <= '0';
 
+            else
+                -------------------------------------------------------
+                -- Defaults: deassert single-cycle pulses
+                -------------------------------------------------------
+                ro_tvalid      <= '0';
+                rd_fifo_rd_en  <= '0';
+
+                -------------------------------------------------------
+                -- Main FSM
+                -------------------------------------------------------
                 case ro_state is
 
+                    ---------------------------------------------------
                     when RO_IDLE =>
-                        ro_x_cnt      <= (others => '0');
-                        ro_y_cnt      <= (others => '0');
-                        ro_sof        <= '1';
-                        ro_tvalid     <= '0';
-                        ro_tlast      <= '0';
-                        rd_fifo_rd_en <= '0';
-                        ro_popped     <= '0';
+                        ro_x_cnt       <= (others => '0');
+                        ro_y_cnt       <= (others => '0');
+                        ro_tlast       <= '0';
+                        ro_tuser       <= '0';
+                        ro_sof_pending <= '1';
+                        ro_tlast_cnt   <= (others => '0');
+
                         if sw_read_hdmi_sync = '1' then
-                            ro_state <= RO_ACTIVE;
+                            ro_state <= RO_WAIT_READY;
                         end if;
 
-                    when RO_ACTIVE =>
+                    ---------------------------------------------------
+                    -- Wait until:
+                    --   * read mode enabled
+                    --   * FIFO has a valid word on dout
+                    --   * FIFO read side not busy
+                    --   * downstream ready is already high
+                    --
+                    -- Then emit exactly one-cycle:
+                    --   * ro_tvalid
+                    --   * rd_fifo_rd_en
+                    ---------------------------------------------------
+                    when RO_WAIT_READY =>
                         if sw_read_hdmi_sync = '0' then
-                            -- Abort: switch released
-                            ro_tvalid     <= '0';
-                            ro_tlast      <= '0';
-                            rd_fifo_rd_en <= '0';
-                            ro_popped     <= '0';
-                            ro_state      <= RO_IDLE;
+                            ro_tlast <= '0';
+                            ro_tuser <= '0';
+                            ro_state <= RO_IDLE;
 
-                        elsif ro_tvalid = '1' then
-                            -- Data is being presented on M_AXIS
-                            if M_AXIS_tready = '1' then
-                                -- Handshake: downstream consumed the pixel.
-                                -- Pop the FIFO so the next word appears on dout.
+                        else
+
+                            if rd_fifo_empty = '0' and
+                            rd_fifo_rd_rst_busy = '0' and
+                            M_AXIS_tready = '1' then
+
+                                -- One-cycle transfer pulse
+                                ro_tvalid     <= '1';
                                 rd_fifo_rd_en <= '1';
-                                ro_popped     <= '1';
-                                ro_sof        <= '0';
-                                -- Deassert tvalid while dout settles (1 cycle)
-                                ro_tvalid     <= '0';
-                                ro_tlast      <= '0';
 
-                                -- Advance x/y counters
+                                -- SOF behavior:
+                                -- Keep TUSER high from first valid until next transfer window
+                                if ro_sof_pending = '1' then
+                                    ro_tuser       <= '1';
+                                    ro_sof_pending <= '0';
+                                else
+                                    ro_tuser       <= '0';
+                                end if;
+
+                                -- End-of-line indication:
+                                -- assert TLAST together with the final transfer,
+                                -- then keep it high during blanking hold.
                                 if ro_x_cnt = to_unsigned(C_CLKS_PER_LINE - 1, ro_x_cnt'length) then
+                                    ro_tlast <= '1';
+
+                                    -- advance line/frame counters
                                     ro_x_cnt <= (others => '0');
+
                                     if ro_y_cnt = to_unsigned(C_V_LINES - 1, ro_y_cnt'length) then
-                                        ro_y_cnt <= (others => '0');
-                                        ro_sof   <= '1';
+                                        ro_y_cnt       <= (others => '0');
+                                        ro_sof_pending <= '1';
                                     else
                                         ro_y_cnt <= ro_y_cnt + 1;
                                     end if;
-                                else
-                                    ro_x_cnt <= ro_x_cnt + 1;
-                                end if;
-                            end if;
-                            -- else: hold tvalid, wait for tready
 
-                        elsif ro_popped = '1' then
-                            -- 1-cycle gap after pop: FIFO dout is settling
-                            ro_popped <= '0';
+                                    ro_tlast_cnt <= to_unsigned(C_TLAST_HOLD_CYCLES - 1, ro_tlast_cnt'length);
+                                    ro_state     <= RO_EOL_HOLD;
 
-                        else
-                            -- ro_tvalid = '0', not just popped: dout is settled
-                            if rd_fifo_empty = '0' and rd_fifo_rd_rst_busy = '0' then
-                                ro_tvalid <= '1';
-                                if ro_x_cnt = to_unsigned(C_CLKS_PER_LINE - 1, ro_x_cnt'length) then
-                                    ro_tlast <= '1';
                                 else
                                     ro_tlast <= '0';
+                                    ro_x_cnt <= ro_x_cnt + 1;
+                                    ro_state <= RO_ADVANCE;
                                 end if;
+                            end if;
+                        end if;
+
+                    ---------------------------------------------------
+                    -- Gap cycle: FIFO processes rd_en and updates dout.
+                    -- After this cycle, next data is valid on dout.
+                    ---------------------------------------------------
+                    when RO_ADVANCE =>
+                        if sw_read_hdmi_sync = '0' then
+                            ro_tlast <= '0';
+                            ro_tuser <= '0';
+                            ro_state <= RO_IDLE;
+                        else
+                            ro_state <= RO_WAIT_READY;
+                        end if;
+
+                    ---------------------------------------------------
+                    -- Hold TLAST high during horizontal blanking.
+                    -- No FIFO reads, no TVALID pulses.
+                    ---------------------------------------------------
+                    when RO_EOL_HOLD =>
+                        if sw_read_hdmi_sync = '0' then
+                            ro_tlast <= '0';
+                            ro_tuser <= '0';
+                            ro_state <= RO_IDLE;
+
+                        else
+                            -- During TLAST hold, no valid transfers
+                            ro_tvalid <= '0';
+                            ro_tuser  <= '0';
+
+                            if ro_tlast_cnt = 0 then
+                                ro_tlast <= '0';
+                                ro_state <= RO_WAIT_READY;
+                            else
+                                ro_tlast_cnt <= ro_tlast_cnt - 1;
                             end if;
                         end if;
 
