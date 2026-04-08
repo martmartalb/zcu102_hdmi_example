@@ -143,6 +143,7 @@ xilinx.com:ip:axis_register_slice:1.1\
 xilinx.com:ip:v_hdmi_tx_ss:3.2\
 xilinx.com:ip:v_hdmi_rx_ss:3.2\
 xilinx.com:ip:util_ds_buf:2.2\
+xilinx.com:ip:system_ila:1.1\
 xilinx.com:ip:v_tpg:8.2\
 xilinx.com:ip:axi_gpio:2.0\
 xilinx.com:ip:smartconnect:1.0\
@@ -1155,8 +1156,20 @@ proc create_root_design { parentCell } {
      return 1
    }
   
+  # Create instance: system_ila_0, and set properties
+  set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
+  set_property -dict [list \
+    CONFIG.C_DATA_DEPTH {131072} \
+    CONFIG.C_NUM_MONITOR_SLOTS {2} \
+    CONFIG.C_SLOT {1} \
+    CONFIG.C_SLOT_0_INTF_TYPE {xilinx.com:interface:axis_rtl:1.0} \
+    CONFIG.C_SLOT_1_INTF_TYPE {xilinx.com:interface:axis_rtl:1.0} \
+  ] $system_ila_0
+
+
   # Create interface connections
   connect_bd_intf_net -intf_net ddr4_frame_buffer_top_0_M_AXIS [get_bd_intf_pins ddr4_frame_buffer_top_0/M_AXIS] [get_bd_intf_pins v_hdmi_tx_ss/VIDEO_IN]
+connect_bd_intf_net -intf_net [get_bd_intf_nets ddr4_frame_buffer_top_0_M_AXIS] [get_bd_intf_pins ddr4_frame_buffer_top_0/M_AXIS] [get_bd_intf_pins system_ila_0/SLOT_1_AXIS]
   connect_bd_intf_net -intf_net intf_net_audio_ss_0_axis_audio_out [get_bd_intf_pins audio_ss_0/axis_audio_out] [get_bd_intf_pins v_hdmi_tx_ss/AUDIO_IN]
   connect_bd_intf_net -intf_net intf_net_bdry_in_DRU_CLK_IN [get_bd_intf_ports DRU_CLK_IN] [get_bd_intf_pins gt_refclk_buf/CLK_IN_D]
   connect_bd_intf_net -intf_net intf_net_rx_video_axis_reg_slice_M_AXIS [get_bd_intf_pins rx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins v_tpg_ss_0/s_axis_video]
@@ -1181,6 +1194,7 @@ proc create_root_design { parentCell } {
   connect_bd_intf_net -intf_net intf_net_zynq_us_ss_0_M06_AXI [get_bd_intf_pins zynq_us_ss_0/M06_AXI] [get_bd_intf_pins audio_ss_0/S00_AXI]
   connect_bd_intf_net -intf_net intf_net_zynq_us_ss_0_M08_AXI [get_bd_intf_pins zynq_us_ss_0/M08_AXI] [get_bd_intf_pins v_tpg_ss_0/S_AXI_GPIO]
   connect_bd_intf_net -intf_net tx_video_axis_reg_slice_M_AXIS [get_bd_intf_pins tx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins ddr4_frame_buffer_top_0/S_AXIS]
+connect_bd_intf_net -intf_net [get_bd_intf_nets tx_video_axis_reg_slice_M_AXIS] [get_bd_intf_pins tx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins system_ila_0/SLOT_0_AXIS]
 
   # Create port connections
   connect_bd_net -net Net  [get_bd_ports c0_ddr4_dm_dbi_n] \
@@ -1308,14 +1322,16 @@ proc create_root_design { parentCell } {
   [get_bd_pins tx_video_axis_reg_slice/aclk] \
   [get_bd_pins v_hdmi_tx_ss/s_axis_video_aclk] \
   [get_bd_pins v_hdmi_rx_ss/s_axis_video_aclk] \
-  [get_bd_pins ddr4_frame_buffer_top_0/hdmi_clk]
+  [get_bd_pins ddr4_frame_buffer_top_0/hdmi_clk] \
+  [get_bd_pins system_ila_0/clk]
   connect_bd_net -net net_zynq_us_ss_0_dcm_locked  [get_bd_pins zynq_us_ss_0/dcm_locked] \
   [get_bd_pins rx_video_axis_reg_slice/aresetn] \
   [get_bd_pins v_tpg_ss_0/m_axi_aresetn] \
   [get_bd_pins tx_video_axis_reg_slice/aresetn] \
   [get_bd_pins v_hdmi_tx_ss/s_axis_video_aresetn] \
   [get_bd_pins v_hdmi_rx_ss/s_axis_video_aresetn] \
-  [get_bd_pins ddr4_frame_buffer_top_0/hdmi_resetn]
+  [get_bd_pins ddr4_frame_buffer_top_0/hdmi_resetn] \
+  [get_bd_pins system_ila_0/resetn]
   connect_bd_net -net net_zynq_us_ss_0_peripheral_aresetn  [get_bd_pins zynq_us_ss_0/peripheral_aresetn] \
   [get_bd_pins audio_ss_0/ARESETN] \
   [get_bd_pins v_hdmi_tx_ss/s_axi_cpu_aresetn] \
