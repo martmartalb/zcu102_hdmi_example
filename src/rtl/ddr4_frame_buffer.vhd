@@ -118,7 +118,7 @@ architecture rtl of ddr4_frame_buffer is
     type cap_state_t is (CAP_IDLE, CAP_WAIT_SOF, CAP_CAPTURING, CAP_DONE);
     type mig_state_t is (M_IDLE, M_WR_PRESENT, M_WR_ADVANCE, M_WR_DONE,
                          M_RD_CMD, M_RD_DRAIN, M_RD_FRAME_DONE, M_RD_ABORT);
-    type ro_state_t  is (RO_IDLE, RO_DRAIN, RO_ACTIVE);
+    type ro_state_t  is (RO_IDLE, RO_ACTIVE);
 
     ---------------------------------------------------------------------------
     -- Switch synchronizers (2-FF) — to MIG domain
@@ -227,7 +227,7 @@ architecture rtl of ddr4_frame_buffer is
     signal ro_sof     : std_logic := '1';
     signal ro_tvalid  : std_logic;
     signal ro_tlast   : std_logic;
-    signal ro_drain_en : std_logic;
+    signal ro_popped   : std_logic := '0'; -- '1' for 1 cycle after FIFO pop
 
     ---------------------------------------------------------------------------
     -- Internal tready for passthrough muxing
@@ -733,16 +733,12 @@ begin
 
     ---------------------------------------------------------------------------
     -- HDMI Read Output FSM (hdmi_clk domain)
+    --
+    -- All outputs (ro_tvalid, ro_tlast, ro_sof, rd_fifo_rd_en) are registered
+    -- inside the clocked process. After each handshake the FIFO is popped
+    -- (rd_fifo_rd_en <= '1') and ro_tvalid is deasserted for one cycle so
+    -- the FWFT dout can settle before the next assertion.
     ---------------------------------------------------------------------------
-
-    -- AXI Stream master outputs
-    ro_tvalid <= '1' when (ro_state = RO_ACTIVE and
-                           rd_fifo_empty = '0' and
-                           rd_fifo_rd_rst_busy = '0')
-                 else '0';
-
-    ro_tlast  <= '1' when (ro_x_cnt = to_unsigned(C_CLKS_PER_LINE - 1, ro_x_cnt'length))
-                 else '0';
 
     -- M_AXIS mux: read playback (sw_read) vs passthrough (default)
     M_AXIS_tdata  <= rd_fifo_dout              when sw_read_hdmi_sync = '1' else S_AXIS_tdata;
@@ -750,62 +746,85 @@ begin
     M_AXIS_tlast  <= ro_tlast and ro_tvalid    when sw_read_hdmi_sync = '1' else S_AXIS_tlast;
     M_AXIS_tuser  <= ro_sof   and ro_tvalid    when sw_read_hdmi_sync = '1' else S_AXIS_tuser;
 
-    -- Drain enable: flush stale FIFO data before playback
-    ro_drain_en <= '1' when (ro_state = RO_DRAIN and rd_fifo_empty = '0' and rd_fifo_rd_rst_busy = '0')
-                   else '0';
-
-    -- Read FIFO pop: normal handshake OR drain flush
-    rd_fifo_rd_en <= (ro_tvalid and M_AXIS_tready) or ro_drain_en;
-
     p_read_output_fsm : process(hdmi_clk)
     begin
         if rising_edge(hdmi_clk) then
             if hdmi_resetn = '0' then
-                ro_state <= RO_IDLE;
-                ro_x_cnt <= (others => '0');
-                ro_y_cnt <= (others => '0');
-                ro_sof   <= '1';
+                ro_state      <= RO_IDLE;
+                ro_x_cnt      <= (others => '0');
+                ro_y_cnt      <= (others => '0');
+                ro_sof        <= '1';
+                ro_tvalid     <= '0';
+                ro_tlast      <= '0';
+                rd_fifo_rd_en <= '0';
+                ro_popped     <= '0';
             else
+                -- Defaults
+                rd_fifo_rd_en <= '0';
+
                 case ro_state is
 
                     when RO_IDLE =>
-                        ro_x_cnt <= (others => '0');
-                        ro_y_cnt <= (others => '0');
-                        ro_sof   <= '1';
+                        ro_x_cnt      <= (others => '0');
+                        ro_y_cnt      <= (others => '0');
+                        ro_sof        <= '1';
+                        ro_tvalid     <= '0';
+                        ro_tlast      <= '0';
+                        rd_fifo_rd_en <= '0';
+                        ro_popped     <= '0';
                         if sw_read_hdmi_sync = '1' then
-                            ro_state <= RO_DRAIN;
-                        end if;
-
-                    when RO_DRAIN =>
-                        -- Discard stale FIFO data before starting playback
-                        if sw_read_hdmi_sync = '0' then
-                            ro_state <= RO_IDLE;
-                        elsif rd_fifo_empty = '1' and rd_fifo_rd_rst_busy = '0' then
                             ro_state <= RO_ACTIVE;
                         end if;
 
                     when RO_ACTIVE =>
-                        -- Abort if switch goes low
                         if sw_read_hdmi_sync = '0' then
-                            ro_state <= RO_IDLE;
-                        -- Advance on handshake
-                        elsif ro_tvalid = '1' and M_AXIS_tready = '1' then
-                            -- Clear SOF after first transfer
-                            ro_sof <= '0';
+                            -- Abort: switch released
+                            ro_tvalid     <= '0';
+                            ro_tlast      <= '0';
+                            rd_fifo_rd_en <= '0';
+                            ro_popped     <= '0';
+                            ro_state      <= RO_IDLE;
 
-                            if ro_x_cnt = to_unsigned(C_CLKS_PER_LINE - 1, ro_x_cnt'length) then
-                                -- End of line
-                                ro_x_cnt <= (others => '0');
-                                if ro_y_cnt = to_unsigned(C_V_LINES - 1, ro_y_cnt'length) then
-                                    -- End of frame: reset for next frame
-                                    ro_y_cnt <= (others => '0');
-                                    ro_sof   <= '1';
-                                    -- Stay in RO_ACTIVE to loop
+                        elsif ro_tvalid = '1' then
+                            -- Data is being presented on M_AXIS
+                            if M_AXIS_tready = '1' then
+                                -- Handshake: downstream consumed the pixel.
+                                -- Pop the FIFO so the next word appears on dout.
+                                rd_fifo_rd_en <= '1';
+                                ro_popped     <= '1';
+                                ro_sof        <= '0';
+                                -- Deassert tvalid while dout settles (1 cycle)
+                                ro_tvalid     <= '0';
+                                ro_tlast      <= '0';
+
+                                -- Advance x/y counters
+                                if ro_x_cnt = to_unsigned(C_CLKS_PER_LINE - 1, ro_x_cnt'length) then
+                                    ro_x_cnt <= (others => '0');
+                                    if ro_y_cnt = to_unsigned(C_V_LINES - 1, ro_y_cnt'length) then
+                                        ro_y_cnt <= (others => '0');
+                                        ro_sof   <= '1';
+                                    else
+                                        ro_y_cnt <= ro_y_cnt + 1;
+                                    end if;
                                 else
-                                    ro_y_cnt <= ro_y_cnt + 1;
+                                    ro_x_cnt <= ro_x_cnt + 1;
                                 end if;
-                            else
-                                ro_x_cnt <= ro_x_cnt + 1;
+                            end if;
+                            -- else: hold tvalid, wait for tready
+
+                        elsif ro_popped = '1' then
+                            -- 1-cycle gap after pop: FIFO dout is settling
+                            ro_popped <= '0';
+
+                        else
+                            -- ro_tvalid = '0', not just popped: dout is settled
+                            if rd_fifo_empty = '0' and rd_fifo_rd_rst_busy = '0' then
+                                ro_tvalid <= '1';
+                                if ro_x_cnt = to_unsigned(C_CLKS_PER_LINE - 1, ro_x_cnt'length) then
+                                    ro_tlast <= '1';
+                                else
+                                    ro_tlast <= '0';
+                                end if;
                             end if;
                         end if;
 
