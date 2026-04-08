@@ -27,6 +27,7 @@ vcom src/rtl/ddr4_frame_buffer.vhd
 # Compile additional sources
 # ============================================================
 vlog /opt/fpga/amd/2025.2/data/verilog/src/glbl.v
+vlog -sv src/tb/mig_model.sv
 
 # ============================================================
 # Compile Testbench (SystemVerilog)
