@@ -84,7 +84,11 @@ entity ddr4_frame_buffer is
         app_wdf_rdy          : in  std_logic;
         app_rd_data          : in  std_logic_vector(APP_DATA_WIDTH-1 downto 0);
         app_rd_data_valid    : in  std_logic;
-        app_rd_data_end      : in  std_logic
+        app_rd_data_end      : in  std_logic;
+
+        --Debug outputs (ILA probes)
+        ila_ro_x_cnt       : out std_logic_vector(15 downto 0);
+        ila_ro_y_cnt        : out std_logic_vector(15 downto 0)
     );
 end entity ddr4_frame_buffer;
 
@@ -242,7 +246,92 @@ architecture rtl of ddr4_frame_buffer is
     ---------------------------------------------------------------------------
     signal wr_fifo_rst : std_logic;
 
+    signal mig_state_dbg : std_logic_vector(3 downto 0);
+
+
+    ---------------------------------------------------------------------------
+    -- ILA Component Declaration
+    ---------------------------------------------------------------------------
+    component ila_mig
+        port (
+            clk    : in std_logic;
+            probe0 : in std_logic_vector(3 downto 0);    -- mig_state_dbg
+            probe1 : in std_logic_vector(27 downto 0);   -- wr_addr
+            probe2 : in std_logic_vector(20 downto 0);   -- wr_count
+            probe3 : in std_logic_vector(27 downto 0);   -- rd_addr
+            probe4 : in std_logic_vector(20 downto 0);   -- rd_cmd_count
+            probe5 : in std_logic_vector(20 downto 0);   -- rd_data_count
+            probe6 : in std_logic_vector(0 downto 0);    -- app_en_r
+            probe7 : in std_logic_vector(0 downto 0);    -- app_rdy
+            probe8 : in std_logic_vector(0 downto 0);    -- app_wdf_rdy
+            probe9 : in std_logic_vector(0 downto 0);    -- app_rd_data_valid
+            probe10: in std_logic_vector(0 downto 0);    -- wr_fifo_empty
+            probe11: in std_logic_vector(0 downto 0);    -- wr_fifo_rd_en
+            probe12: in std_logic_vector(0 downto 0);    -- rd_fifo_wr_en
+            probe13: in std_logic_vector(0 downto 0);    -- rd_fifo_prog_full
+            probe14: in std_logic_vector(0 downto 0);    -- rd_fifo_flush
+            probe15: in std_logic_vector(0 downto 0);    -- sw_save_mig_sync
+            probe16: in std_logic_vector(0 downto 0);    -- sw_read_mig_sync
+            probe17: in std_logic_vector(0 downto 0);    -- capture_en_mig
+            probe18: in std_logic_vector(0 downto 0);    -- rd_fifo_empty_mig_sync
+            probe19: in std_logic_vector(2 downto 0);    -- app_cmd_r
+            probe20: in std_logic_vector(0 downto 0);    -- init_calib_complete
+            probe21: in std_logic_vector(0 downto 0);    -- wr_fifo_rd_rst_busy
+            probe22: in std_logic_vector(127 downto 0);  -- app_wdf_data_r
+            probe23: in std_logic_vector(127 downto 0)   -- app_rd_data
+        );
+    end component;
+
 begin
+
+    ---------------------------------------------------------------------------
+    -- MIG FSM state encoding for ILA visibility
+    ---------------------------------------------------------------------------
+    with mig_state select mig_state_dbg <=
+        x"0" when M_IDLE,
+        x"1" when M_WR_PRESENT,
+        x"2" when M_WR_ADVANCE,
+        x"3" when M_WR_DONE,
+        x"4" when M_RD_CMD,
+        x"5" when M_RD_DRAIN,
+        x"6" when M_RD_FRAME_DONE,
+        x"7" when M_RD_ABORT,
+        x"F" when others;
+
+    ---------------------------------------------------------------------------
+    -- ILA Instance for MIG FSM debugging
+    ---------------------------------------------------------------------------
+    u_ila_mig : ila_mig
+        port map (
+            clk       => mig_clk,
+            probe0    => mig_state_dbg,
+            probe1    => std_logic_vector(wr_addr),
+            probe2    => std_logic_vector(wr_count),
+            probe3    => std_logic_vector(rd_addr),
+            probe4    => std_logic_vector(rd_cmd_count),
+            probe5    => std_logic_vector(rd_data_count),
+            probe6(0) => app_en_r,
+            probe7(0) => app_rdy,
+            probe8(0) => app_wdf_rdy,
+            probe9(0) => app_rd_data_valid,
+            probe10(0)=> wr_fifo_empty,
+            probe11(0)=> wr_fifo_rd_en,
+            probe12(0)=> rd_fifo_wr_en,
+            probe13(0)=> rd_fifo_prog_full,
+            probe14(0)=> rd_fifo_flush,
+            probe15(0)=> sw_save_mig_sync,
+            probe16(0)=> sw_read_mig_sync,
+            probe17(0)=> capture_en_mig,
+            probe18(0)=> rd_fifo_empty_mig_sync,
+            probe19   => app_cmd_r,
+            probe20(0)=> init_calib_complete,
+            probe21(0)=> wr_fifo_rd_rst_busy,
+            probe22   => app_wdf_data_r,
+            probe23   => app_rd_data
+    );
+
+    ila_ro_x_cnt <= std_logic_vector(ro_x_cnt);
+    ila_ro_y_cnt <= std_logic_vector(ro_y_cnt);
 
     wr_fifo_rst    <= not hdmi_resetn;
     rd_fifo_rst_int <= mig_rst or rd_fifo_flush;
@@ -768,8 +857,8 @@ begin
                 -------------------------------------------------------
                 -- Defaults: deassert single-cycle pulses
                 -------------------------------------------------------
-                ro_tvalid      <= '0';
-                rd_fifo_rd_en  <= '0';
+                -- ro_tvalid      <= '0';
+                -- rd_fifo_rd_en  <= '0';
 
                 -------------------------------------------------------
                 -- Main FSM
@@ -780,13 +869,17 @@ begin
                     when RO_IDLE =>
                         ro_x_cnt       <= (others => '0');
                         ro_y_cnt       <= (others => '0');
+                        ro_tvalid      <= '0';
                         ro_tlast       <= '0';
                         ro_tuser       <= '0';
                         ro_sof_pending <= '1';
                         ro_tlast_cnt   <= (others => '0');
+                        rd_fifo_rd_en  <= '0';
 
                         if sw_read_hdmi_sync = '1' then
                             ro_state <= RO_WAIT_READY;
+                        else
+                            ro_state <= RO_IDLE;
                         end if;
 
                     ---------------------------------------------------
@@ -802,8 +895,14 @@ begin
                     ---------------------------------------------------
                     when RO_WAIT_READY =>
                         if sw_read_hdmi_sync = '0' then
-                            ro_tlast <= '0';
-                            ro_tuser <= '0';
+                            ro_x_cnt       <= (others => '0');
+                            ro_y_cnt       <= (others => '0');
+                            ro_tvalid      <= '0';
+                            ro_tlast       <= '0';
+                            ro_tuser       <= '0';
+                            ro_sof_pending <= '1';
+                            ro_tlast_cnt   <= (others => '0');
+                            rd_fifo_rd_en  <= '0';
                             ro_state <= RO_IDLE;
 
                         else
@@ -847,8 +946,19 @@ begin
                                 else
                                     ro_tlast <= '0';
                                     ro_x_cnt <= ro_x_cnt + 1;
+                                    ro_y_cnt <= ro_y_cnt;
                                     ro_state <= RO_ADVANCE;
                                 end if;
+                            else
+                                ro_x_cnt       <= ro_x_cnt;
+                                ro_y_cnt       <= ro_y_cnt;
+                                ro_tvalid      <= '0';
+                                ro_tlast       <= ro_tlast;
+                                ro_tuser       <= ro_tuser;
+                                ro_sof_pending <= ro_sof_pending;
+                                ro_tlast_cnt   <= ro_tlast_cnt;
+                                rd_fifo_rd_en  <= '0';
+                                ro_state <= RO_WAIT_READY;
                             end if;
                         end if;
 
@@ -858,10 +968,24 @@ begin
                     ---------------------------------------------------
                     when RO_ADVANCE =>
                         if sw_read_hdmi_sync = '0' then
-                            ro_tlast <= '0';
-                            ro_tuser <= '0';
+                            ro_x_cnt       <= (others => '0');
+                            ro_y_cnt       <= (others => '0');
+                            ro_tvalid      <= '0';
+                            ro_tlast       <= '0';
+                            ro_tuser       <= '0';
+                            ro_sof_pending <= '1';
+                            ro_tlast_cnt   <= (others => '0');
+                            rd_fifo_rd_en  <= '0';
                             ro_state <= RO_IDLE;
                         else
+                            ro_x_cnt       <= ro_x_cnt;
+                            ro_y_cnt       <= ro_y_cnt;
+                            ro_tvalid      <= '0';
+                            ro_tlast       <= ro_tlast;
+                            ro_tuser       <= ro_tuser;
+                            ro_sof_pending <= ro_sof_pending;
+                            ro_tlast_cnt   <= ro_tlast_cnt;
+                            rd_fifo_rd_en  <= '0';
                             ro_state <= RO_WAIT_READY;
                         end if;
 
@@ -871,20 +995,31 @@ begin
                     ---------------------------------------------------
                     when RO_EOL_HOLD =>
                         if sw_read_hdmi_sync = '0' then
-                            ro_tlast <= '0';
-                            ro_tuser <= '0';
+                            ro_x_cnt       <= (others => '0');
+                            ro_y_cnt       <= (others => '0');
+                            ro_tvalid      <= '0';
+                            ro_tlast       <= '0';
+                            ro_tuser       <= '0';
+                            ro_sof_pending <= '1';
+                            ro_tlast_cnt   <= (others => '0');
+                            rd_fifo_rd_en  <= '0';
                             ro_state <= RO_IDLE;
 
                         else
                             -- During TLAST hold, no valid transfers
-                            ro_tvalid <= '0';
-                            ro_tuser  <= '0';
+                            ro_x_cnt       <= ro_x_cnt;
+                            ro_y_cnt       <= ro_y_cnt;
+                            ro_tvalid      <= '0';
+                            ro_tlast       <= '1';
+                            ro_tuser       <= '0';
+                            ro_sof_pending <= ro_sof_pending;
+                            rd_fifo_rd_en  <= '0';
 
                             if ro_tlast_cnt = 0 then
-                                ro_tlast <= '0';
                                 ro_state <= RO_WAIT_READY;
                             else
                                 ro_tlast_cnt <= ro_tlast_cnt - 1;
+                                ro_state     <= RO_EOL_HOLD;
                             end if;
                         end if;
 

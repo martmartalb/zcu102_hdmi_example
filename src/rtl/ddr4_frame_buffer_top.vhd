@@ -49,7 +49,10 @@ entity ddr4_frame_buffer_top is
         c0_ddr4_reset_n  : OUT STD_LOGIC;
         c0_ddr4_act_n    : OUT STD_LOGIC;
         c0_ddr4_ck_c     : OUT STD_LOGIC_VECTOR(0 DOWNTO 0);
-        c0_ddr4_ck_t     : OUT STD_LOGIC_VECTOR(0 DOWNTO 0)
+        c0_ddr4_ck_t     : OUT STD_LOGIC_VECTOR(0 DOWNTO 0);
+        --Debug outputs (ILA probes)
+        ila_ro_x_cnt     : out std_logic_vector(15 downto 0);
+        ila_ro_y_cnt     : out std_logic_vector(15 downto 0)
   ) ;
 end ddr4_frame_buffer_top ;
 
@@ -175,7 +178,10 @@ architecture arch of ddr4_frame_buffer_top is
         app_wdf_rdy          : in  std_logic;
         app_rd_data          : in  std_logic_vector(APP_DATA_WIDTH-1 downto 0);
         app_rd_data_valid    : in  std_logic;
-        app_rd_data_end      : in  std_logic
+        app_rd_data_end      : in  std_logic;
+        --Debug outputs (ILA probes)
+        ila_ro_x_cnt         : out std_logic_vector(15 downto 0);
+        ila_ro_y_cnt         : out std_logic_vector(15 downto 0)
     );
     END COMPONENT;
 
@@ -227,7 +233,9 @@ begin
             app_wdf_rdy         => s_app_wdf_rdy,
             app_rd_data         => s_app_rd_data,
             app_rd_data_valid   => s_app_rd_data_valid,
-            app_rd_data_end     => s_app_rd_data_end
+            app_rd_data_end     => s_app_rd_data_end,
+            ila_ro_x_cnt        => ila_ro_x_cnt,
+            ila_ro_y_cnt        => ila_ro_y_cnt
         );
 
     u_ddr4 : ddr4_0

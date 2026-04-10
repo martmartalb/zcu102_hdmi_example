@@ -1160,7 +1160,9 @@ proc create_root_design { parentCell } {
   set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
   set_property -dict [list \
     CONFIG.C_DATA_DEPTH {131072} \
+    CONFIG.C_MON_TYPE {MIX} \
     CONFIG.C_NUM_MONITOR_SLOTS {2} \
+    CONFIG.C_NUM_OF_PROBES {2} \
     CONFIG.C_SLOT {1} \
     CONFIG.C_SLOT_0_INTF_TYPE {xilinx.com:interface:axis_rtl:1.0} \
     CONFIG.C_SLOT_1_INTF_TYPE {xilinx.com:interface:axis_rtl:1.0} \
@@ -1229,6 +1231,10 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets tx_video_axis_reg_slice_M_AXIS] 
   [get_bd_ports c0_ddr4_odt]
   connect_bd_net -net ddr4_frame_buffer_top_0_c0_ddr4_reset_n  [get_bd_pins ddr4_frame_buffer_top_0/c0_ddr4_reset_n] \
   [get_bd_ports c0_ddr4_reset_n]
+  connect_bd_net -net ddr4_frame_buffer_top_0_ila_ro_x_cnt  [get_bd_pins ddr4_frame_buffer_top_0/ila_ro_x_cnt] \
+  [get_bd_pins system_ila_0/probe0]
+  connect_bd_net -net ddr4_frame_buffer_top_0_ila_ro_y_cnt  [get_bd_pins ddr4_frame_buffer_top_0/ila_ro_y_cnt] \
+  [get_bd_pins system_ila_0/probe1]
   connect_bd_net -net net_audio_ss_0_aud_acr_cts_out  [get_bd_pins audio_ss_0/aud_acr_cts_out] \
   [get_bd_pins v_hdmi_tx_ss/acr_cts]
   connect_bd_net -net net_audio_ss_0_aud_acr_n_out  [get_bd_pins audio_ss_0/aud_acr_n_out] \
