@@ -8,13 +8,14 @@ if {[file exists work]} {
     vdel -lib work -all
 }
 
+set xilinx $env(XILINX_VIVADO)
+
 vlib work
 vmap work work
 
 # ============================================================
 # Map libraries
 # ============================================================
-vmap uvm_lib /opt/fpga/uvm-1.2/uvm_lib
 vmap xpm ./simlib/xpm
 
 # ============================================================
@@ -26,23 +27,20 @@ vcom src/rtl/ddr4_frame_buffer.vhd
 # ============================================================
 # Compile additional sources
 # ============================================================
-vlog /opt/fpga/amd/2025.2/data/verilog/src/glbl.v
+vlog $xilinx/data/verilog/src/glbl.v
 vlog -sv src/tb/mig_model.sv
 
 # ============================================================
 # Compile Testbench (SystemVerilog)
 # ============================================================
 vlog -sv \
-     -L uvm_lib \
      +incdir+src/tb \
-     +incdir+/opt/fpga/uvm-1.2/src \
      src/tb/ddr4_frame_buffer_tb.sv
 
 # ============================================================
 # Simulate
 # ============================================================
 vsim -voptargs=+acc \
-     -L uvm_lib \
      -dpicpppath /usr/bin/gcc \
      work.ddr4_frame_buffer_tb \
      work.glbl
