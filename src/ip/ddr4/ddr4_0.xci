@@ -4,7 +4,7 @@
     "xci_name": "ddr4_0",
     "component_reference": "xilinx.com:ip:ddr4:2.2",
     "ip_revision": "28",
-    "gen_directory": "../../vivado_project/vivado_project.gen/sources_1/ip/ddr4_0",
+    "gen_directory": "../../../vivado_project/vivado_project.gen/sources_1/ip/ddr4_0",
     "parameters": {
       "component_parameters": {
         "C0.ControllerType": [ { "value": "DDR4_SDRAM", "resolve_type": "user", "enabled": false, "usage": "all" } ],
@@ -304,7 +304,7 @@
         "IPCONTEXT": [ { "value": "IP_Flow" } ],
         "IPREVISION": [ { "value": "28" } ],
         "MANAGED": [ { "value": "TRUE" } ],
-        "OUTPUTDIR": [ { "value": "../../vivado_project/vivado_project.gen/sources_1/ip/ddr4_0" } ],
+        "OUTPUTDIR": [ { "value": "../../../vivado_project/vivado_project.gen/sources_1/ip/ddr4_0" } ],
         "SELECTEDSIMMODEL": [ { "value": "" } ],
         "SHAREDDIR": [ { "value": "." } ],
         "SWVERSION": [ { "value": "2025.2" } ],
@@ -481,5 +481,5 @@
       }
     }
   },
-  "checksum": "a6b02b39"
+  "checksum": "c3f7e679"
 }

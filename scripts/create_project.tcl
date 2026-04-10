@@ -188,7 +188,7 @@ set_property -name "file_type" -value "Memory Initialization Files" -objects $fi
 # Add all .xci IP files from src/ip/ with properties
 set obj [get_filesets sources_1]
 set ip_files [list \
- [file normalize "${origin_dir}/src/ip/ddr4_0.xci"] \
+ [file normalize "${origin_dir}/src/ip/ddr4/ddr4_0.xci"] \
 ]
 add_files -norecurse -fileset $obj $ip_files
 
