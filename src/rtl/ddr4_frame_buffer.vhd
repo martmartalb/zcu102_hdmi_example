@@ -176,6 +176,7 @@ architecture rtl of ddr4_frame_buffer is
     signal wr_fifo_din         : std_logic_vector(47 downto 0);
     signal wr_fifo_wr_en       : std_logic;
     signal wr_fifo_full        : std_logic;
+    signal wr_fifo_almost_full : std_logic;
     signal wr_fifo_wr_rst_busy : std_logic;
     signal wr_fifo_dout        : std_logic_vector(47 downto 0);
     signal wr_fifo_rd_en       : std_logic;
@@ -240,6 +241,7 @@ architecture rtl of ddr4_frame_buffer is
     -- Internal tready for passthrough muxing
     ---------------------------------------------------------------------------
     signal s_axis_tready_int : std_logic;
+    signal cap_tready        : std_logic;
 
     ---------------------------------------------------------------------------
     -- Internal reset for write FIFO (active-high)
@@ -439,6 +441,7 @@ begin
         wr_en         => wr_fifo_wr_en,
         din           => wr_fifo_din,
         full          => wr_fifo_full,
+        almost_full   => wr_fifo_almost_full,
         wr_rst_busy   => wr_fifo_wr_rst_busy,
         rd_clk        => mig_clk,
         rd_en         => wr_fifo_rd_en,
@@ -448,7 +451,6 @@ begin
         -- Unused outputs
         overflow      => open,
         wr_ack        => open,
-        almost_full   => open,
         prog_full     => open,
         wr_data_count => open,
         underflow     => open,
@@ -525,6 +527,13 @@ begin
     ---------------------------------------------------------------------------
 
     wr_fifo_din   <= S_AXIS_tdata;
+
+    cap_tready  <= '0' when (cap_state = CAP_CAPTURING and
+                             (wr_fifo_almost_full = '1' or wr_fifo_wr_rst_busy = '1'))
+                   else '1';
+    s_axis_tready_int <= '1' when sw_read_hdmi_sync = '1'
+                         else (cap_tready and M_AXIS_tready) when cap_state = CAP_CAPTURING
+                         else M_AXIS_tready;
     S_AXIS_tready <= s_axis_tready_int;
 
     p_capture_fsm : process(hdmi_clk)
@@ -533,7 +542,6 @@ begin
             if hdmi_resetn = '0' then
                 cap_state         <= CAP_IDLE;
                 cap_count         <= (others => '0');
-                s_axis_tready_int <= '0';
                 wr_fifo_wr_en     <= '0';
             else
                 -- Defaults
@@ -543,36 +551,24 @@ begin
 
                     when CAP_IDLE =>
                         cap_count         <= (others => '0');
-                        s_axis_tready_int <= M_AXIS_tready;
-                        if sw_read_hdmi_sync = '1' then
-                            s_axis_tready_int <= '1';
-                        end if;
                         -- Detect rising edge of capture_en
                         if capture_en_hdmi_sync = '1' and capture_en_hdmi_prev = '0' then
                             cap_state <= CAP_WAIT_SOF;
                         end if;
 
-                    when CAP_WAIT_SOF =>
-                        s_axis_tready_int <= M_AXIS_tready;
-                        if sw_read_hdmi_sync = '1' then
-                            s_axis_tready_int <= '1';
-                        end if;
+                    when CAP_WAIT_SOF => 
                         -- Wait for start-of-frame
                         if S_AXIS_tvalid = '1' and S_AXIS_tuser = '1' and s_axis_tready_int = '1' then
-                            wr_fifo_wr_en <= '1';
-                            cap_count     <= to_unsigned(1, cap_count'length);
-                            cap_state     <= CAP_CAPTURING;
+                            wr_fifo_wr_en     <= '1';
+                            cap_count         <= to_unsigned(1, cap_count'length);
+                            cap_state         <= CAP_CAPTURING;
+                        else
+                            wr_fifo_wr_en     <= '0';
+                            cap_count         <= (others => '0');
+                            cap_state         <= CAP_WAIT_SOF;
                         end if;
 
                     when CAP_CAPTURING =>
-                        -- Backpressure: must satisfy both FIFO and TX
-                        if sw_read_hdmi_sync = '1' then
-                            s_axis_tready_int <= '1';
-                        elsif wr_fifo_full = '1' or wr_fifo_wr_rst_busy = '1' then
-                            s_axis_tready_int <= '0';
-                        else
-                            s_axis_tready_int <= M_AXIS_tready;
-                        end if;
                         -- Count accepted transfers
                         if S_AXIS_tvalid = '1' and s_axis_tready_int = '1' then
                             wr_fifo_wr_en <= '1';
@@ -584,10 +580,6 @@ begin
                         end if;
 
                     when CAP_DONE =>
-                        s_axis_tready_int <= M_AXIS_tready;
-                        if sw_read_hdmi_sync = '1' then
-                            s_axis_tready_int <= '1';
-                        end if;
                         -- Wait for capture_en to deassert
                         if capture_en_hdmi_sync = '0' then
                             cap_state <= CAP_IDLE;
