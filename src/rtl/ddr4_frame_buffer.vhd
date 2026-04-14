@@ -111,7 +111,7 @@ architecture rtl of ddr4_frame_buffer is
     constant C_CLKS_PER_LINE       : integer := C_H_PIXELS / C_PIXELS_PER_CLK; -- 960
     constant C_AXI_XFERS_PER_FRAME : integer := C_CLKS_PER_LINE * C_V_LINES;   -- 1,036,800
     constant C_DDR_OPS_PER_FRAME   : integer := C_AXI_XFERS_PER_FRAME;       -- 1,036,800 (1:1)
-    constant C_ADDR_STEP           : unsigned(APP_ADDR_WIDTH-1 downto 0) := to_unsigned(16, APP_ADDR_WIDTH);
+    constant C_ADDR_STEP           : unsigned(APP_ADDR_WIDTH-1 downto 0) := to_unsigned(8, APP_ADDR_WIDTH);
 
     constant CMD_WRITE : std_logic_vector(2 downto 0) := "000";
     constant CMD_READ  : std_logic_vector(2 downto 0) := "001";
@@ -122,7 +122,7 @@ architecture rtl of ddr4_frame_buffer is
     -- FSM state types
     ---------------------------------------------------------------------------
     type cap_state_t is (CAP_IDLE, CAP_WAIT_SOF, CAP_CAPTURING, CAP_DONE);
-    type mig_state_t is (M_IDLE, M_WR_PRESENT, M_WR_ADVANCE, M_WR_DONE,
+    type mig_state_t is (M_IDLE, M_WR_LOAD, M_WR_SETUP, M_WR_SEND, M_WR_DONE,
                          M_RD_CMD, M_RD_DRAIN, M_RD_FRAME_DONE, M_RD_ABORT);
     type ro_state_t  is (RO_IDLE, RO_WAIT_READY, RO_ADVANCE, RO_EOL_HOLD);
 
@@ -225,6 +225,10 @@ architecture rtl of ddr4_frame_buffer is
     signal app_wdf_wren_r : std_logic := '0';
     signal app_wdf_end_r  : std_logic := '0';
 
+    signal wr_cmd_accepted  : std_logic;
+    signal wr_data_accepted : std_logic;
+
+
     ---------------------------------------------------------------------------
     -- HDMI Read Output FSM signals
     ---------------------------------------------------------------------------
@@ -280,7 +284,9 @@ architecture rtl of ddr4_frame_buffer is
             probe20: in std_logic_vector(0 downto 0);    -- init_calib_complete
             probe21: in std_logic_vector(0 downto 0);    -- wr_fifo_rd_rst_busy
             probe22: in std_logic_vector(127 downto 0);  -- app_wdf_data_r
-            probe23: in std_logic_vector(127 downto 0)   -- app_rd_data
+            probe23: in std_logic_vector(127 downto 0);  -- app_rd_data
+            probe24: in std_logic_vector(0 downto 0);    -- app_wdf_wren_r
+            probe25: in std_logic_vector(27 downto 0)    -- app_addr_r
         );
     end component;
 
@@ -291,13 +297,14 @@ begin
     ---------------------------------------------------------------------------
     with mig_state select mig_state_dbg <=
         x"0" when M_IDLE,
-        x"1" when M_WR_PRESENT,
-        x"2" when M_WR_ADVANCE,
-        x"3" when M_WR_DONE,
-        x"4" when M_RD_CMD,
-        x"5" when M_RD_DRAIN,
-        x"6" when M_RD_FRAME_DONE,
-        x"7" when M_RD_ABORT,
+        x"1" when M_WR_LOAD,
+        x"2" when M_WR_SETUP,
+        x"3" when M_WR_SEND,
+        x"4" when M_WR_DONE,
+        x"5" when M_RD_CMD,
+        x"6" when M_RD_DRAIN,
+        x"7" when M_RD_FRAME_DONE,
+        x"8" when M_RD_ABORT,
         x"F" when others;
 
     ---------------------------------------------------------------------------
@@ -329,7 +336,9 @@ begin
             probe20(0)=> init_calib_complete,
             probe21(0)=> wr_fifo_rd_rst_busy,
             probe22   => app_wdf_data_r,
-            probe23   => app_rd_data
+            probe23   => app_rd_data,
+            probe24(0)=> app_wdf_wren_r,
+            probe25   => app_addr_r
     );
 
     ila_ro_x_cnt <= std_logic_vector(ro_x_cnt);
@@ -636,8 +645,8 @@ begin
                 -- DDR read data into the read FIFO.
                 ---------------------------------------------------------------
                 if (mig_state = M_RD_CMD or mig_state = M_RD_DRAIN) and
-                   app_rd_data_valid = '1' and rd_fifo_wr_rst_busy = '0' and
-                   rd_data_count < to_unsigned(C_DDR_OPS_PER_FRAME, rd_data_count'length) then
+                app_rd_data_valid = '1' and rd_fifo_wr_rst_busy = '0' and
+                rd_data_count < to_unsigned(C_DDR_OPS_PER_FRAME, rd_data_count'length) then
                     rd_fifo_wr_en <= '1';
                     rd_fifo_din   <= app_rd_data(47 downto 0);
                     rd_data_count <= rd_data_count + 1;
@@ -653,14 +662,12 @@ begin
                         app_en_r       <= '0';
                         app_wdf_wren_r <= '0';
                         app_wdf_end_r  <= '0';
-
                         if init_calib_complete = '1' then
-                            -- Write priority: check sw_save rising edge first
                             if sw_save_mig_sync = '1' and sw_save_mig_prev = '0' then
                                 capture_en_mig <= '1';
                                 wr_addr        <= unsigned(BASE_ADDR);
                                 wr_count       <= (others => '0');
-                                mig_state      <= M_WR_PRESENT;
+                                mig_state      <= M_WR_LOAD;
                             elsif sw_read_mig_sync = '1' then
                                 rd_addr       <= unsigned(BASE_ADDR);
                                 rd_cmd_count  <= (others => '0');
@@ -670,49 +677,52 @@ begin
                         end if;
 
                     -------------------------------------------------------
-                    -- Write: present DDR write from FIFO dout, hold until
-                    -- accepted. FWFT: dout valid when empty='0'.
-                    -- After acceptance, need gap cycle (M_WR_ADVANCE)
-                    -- for FIFO to present next word on dout.
+                    -- Load data from FIFO into MIG registers
                     -------------------------------------------------------
-                    when M_WR_PRESENT =>
-                        if app_en_r = '1' then
-                            -- Command in flight: wait for acceptance
-                            if app_rdy = '1' and app_wdf_rdy = '1' then
-                                -- DDR accepted: advance FIFO and counters
-                                wr_fifo_rd_en  <= '1';
-                                wr_addr        <= wr_addr + C_ADDR_STEP;
-                                app_en_r       <= '0';
-                                app_wdf_wren_r <= '0';
-                                app_wdf_end_r  <= '0';
+                    when M_WR_LOAD =>
+                        wr_cmd_accepted  <= '0';
+                        wr_data_accepted <= '0';
+                        app_en_r         <= '0';   -- keep deasserted this cycle
+                        app_wdf_wren_r   <= '0';
+                        app_wdf_end_r    <= '0';
 
-                                if wr_count = to_unsigned(C_DDR_OPS_PER_FRAME - 1, wr_count'length) then
-                                    capture_en_mig <= '0';
-                                    mig_state      <= M_WR_DONE;
-                                else
-                                    wr_count  <= wr_count + 1;
-                                    mig_state <= M_WR_ADVANCE;
-                                end if;
-                            end if;
-                            -- If not accepted: hold (signals remain asserted)
-                        else
-                            -- No command in flight: present new one if FIFO has data
-                            if wr_fifo_empty = '0' and wr_fifo_rd_rst_busy = '0' then
-                                app_cmd_r      <= CMD_WRITE;
-                                app_addr_r     <= std_logic_vector(wr_addr);
-                                app_en_r       <= '1';
-                                app_wdf_data_r <= x"00000000000000000000" & wr_fifo_dout;
-                                app_wdf_wren_r <= '1';
-                                app_wdf_end_r  <= '1';
-                            end if;
+                        if wr_fifo_empty = '0' and wr_fifo_rd_rst_busy = '0' then
+                            -- Latch addr/cmd this cycle; they'll be stable at MIG input next cycle
+                            app_cmd_r      <= CMD_WRITE;
+                            app_addr_r     <= std_logic_vector(wr_addr);
+                            app_wdf_data_r <= x"00000000000000000000" & wr_fifo_dout;
+                            wr_fifo_rd_en  <= '1';
+                            mig_state      <= M_WR_SETUP;  -- new state
                         end if;
 
-                    -------------------------------------------------------
-                    -- Gap cycle: FIFO processes rd_en and updates dout.
-                    -- After this cycle, new data is available on dout.
-                    -------------------------------------------------------
-                    when M_WR_ADVANCE =>
-                        mig_state <= M_WR_PRESENT;
+                    -- New one-cycle setup state: addr/cmd now stable, assert app_en
+                    when M_WR_SETUP =>
+                        app_en_r       <= '1';
+                        app_wdf_wren_r <= '1';
+                        app_wdf_end_r  <= '1';
+                        mig_state      <= M_WR_SEND;
+
+                    when M_WR_SEND =>
+                        -- addr/cmd have been stable since M_WR_LOAD, app_en stable since M_WR_SETUP
+                        if app_rdy = '1' then
+                            app_en_r        <= '0';
+                            wr_cmd_accepted <= '1';
+                        end if;
+                        if app_wdf_rdy = '1' then
+                            app_wdf_wren_r   <= '0';
+                            app_wdf_end_r    <= '0';
+                            wr_data_accepted <= '1';
+                        end if;
+                        if wr_cmd_accepted = '1' and wr_data_accepted = '1' then
+                            wr_addr <= wr_addr + C_ADDR_STEP;
+                            if wr_count = to_unsigned(C_DDR_OPS_PER_FRAME - 1, wr_count'length) then
+                                capture_en_mig <= '0';
+                                mig_state      <= M_WR_DONE;
+                            else
+                                wr_count  <= wr_count + 1;
+                                mig_state <= M_WR_LOAD;
+                            end if;
+                        end if;
 
                     -------------------------------------------------------
                     when M_WR_DONE =>
@@ -725,10 +735,7 @@ begin
                         end if;
 
                     -------------------------------------------------------
-                    -- Read: issue DDR read commands, pipelined.
-                    -- Hold app_en until accepted, then update address for
-                    -- next command. Throttled by prog_full on read FIFO.
-                    -- Abort to M_RD_ABORT if sw_read goes low.
+                    -- Load read command into MIG registers
                     -------------------------------------------------------
                     when M_RD_CMD =>
                         if sw_read_mig_sync = '0' then
