@@ -151,6 +151,8 @@ if {[string equal [get_filesets -quiet sources_1] ""]} {
 set obj [get_filesets sources_1]
 set files [list \
  [file normalize "${origin_dir}/src/rtl/bram_image_streamer.vhd"] \
+ [file normalize "${origin_dir}/src/rtl/ddr4_frame_buffer_top.vhd"] \
+ [file normalize "${origin_dir}/src/rtl/ddr4_frame_buffer.vhd"] \
  [file normalize "${origin_dir}/src/data/image.mem"] \
 ]
 add_files -norecurse -fileset $obj $files
@@ -163,11 +165,39 @@ set_property -name "used_in" -value "synthesis implementation" -objects $file_ob
 set_property -name "used_in_simulation" -value "0" -objects $file_obj
 set_property -name "file_type" -value "VHDL" -objects $file_obj
 
+set file "${origin_dir}/src/rtl/ddr4_frame_buffer_top.vhd"
+set file [file normalize $file]
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "used_in" -value "synthesis implementation" -objects $file_obj
+set_property -name "used_in_simulation" -value "0" -objects $file_obj
+set_property -name "file_type" -value "VHDL" -objects $file_obj
+
+set file "${origin_dir}/src/rtl/ddr4_frame_buffer.vhd"
+set file [file normalize $file]
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "used_in" -value "synthesis implementation" -objects $file_obj
+set_property -name "used_in_simulation" -value "0" -objects $file_obj
+set_property -name "file_type" -value "VHDL" -objects $file_obj
+
 set file "$origin_dir/src/data/image.mem"
 set file [file normalize $file]
 set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
 set_property -name "file_type" -value "Memory Initialization Files" -objects $file_obj
 
+
+# Add all .xci IP files from src/ip/ with properties
+set obj [get_filesets sources_1]
+set ip_files [list \
+ [file normalize "${origin_dir}/src/ip/ddr4/ddr4_0.xci"] \
+ [file normalize "${origin_dir}/src/ip/ila_mig/ila_mig.xci"] \
+]
+add_files -norecurse -fileset $obj $ip_files
+
+foreach ip [get_ips] {
+    generate_target all $ip
+}
+
+puts "INFO: Added [llength $ip_files] IP cores"
 
 # Set 'sources_1' fileset file properties for local files
 # None
@@ -551,8 +581,8 @@ move_dashboard_gadget -name {methodology_1} -row 2 -col 1
 source scripts/create_root_design.tcl
 
 # Set the absolute path to image.mem on the IP instance
-set mem_path [get_files image.mem]
-set_property -dict [list CONFIG.MEM_INIT_FILE $mem_path] [get_bd_cells bram_image_streamer_0]
+# set mem_path [get_files image.mem]
+# set_property -dict [list CONFIG.MEM_INIT_FILE $mem_path] [get_bd_cells bram_image_streamer_0]
 
 set_property REGISTERED_WITH_MANAGER "1" [get_files exdes.bd ] 
 set_property SYNTH_CHECKPOINT_MODE "Hierarchical" [get_files exdes.bd ] 

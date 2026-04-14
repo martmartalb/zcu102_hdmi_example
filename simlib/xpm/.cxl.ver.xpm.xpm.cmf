@@ -1,0 +1,6 @@
+/opt/fpga/amd/2025.2/data/ip/xpm/xpm_cdc/hdl/xpm_cdc.sv
+/opt/fpga/amd/2025.2/data/ip/xpm/xpm_fifo/hdl/xpm_fifo.sv
+/opt/fpga/amd/2025.2/data/ip/xpm/xpm_fifo/simulation/xpm_fifo_tb.sv
+/opt/fpga/amd/2025.2/data/ip/xpm/xpm_pmc_bridge/hdl/xpm_pmc_bridge.sv
+/opt/fpga/amd/2025.2/data/ip/xpm/xpm_memory/hdl/xpm_memory.sv
+/opt/fpga/amd/2025.2/data/ip/xpm/xpm_axi32/hdl/xpm_axi32.sv
