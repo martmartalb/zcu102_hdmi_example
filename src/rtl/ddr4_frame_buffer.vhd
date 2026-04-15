@@ -84,11 +84,7 @@ entity ddr4_frame_buffer is
         app_wdf_rdy          : in  std_logic;
         app_rd_data          : in  std_logic_vector(APP_DATA_WIDTH-1 downto 0);
         app_rd_data_valid    : in  std_logic;
-        app_rd_data_end      : in  std_logic;
-
-        --Debug outputs (ILA probes)
-        ila_ro_x_cnt       : out std_logic_vector(15 downto 0);
-        ila_ro_y_cnt        : out std_logic_vector(15 downto 0)
+        app_rd_data_end      : in  std_logic
     );
 end entity ddr4_frame_buffer;
 
@@ -340,9 +336,6 @@ begin
             probe24(0)=> app_wdf_wren_r,
             probe25   => app_addr_r
     );
-
-    ila_ro_x_cnt <= std_logic_vector(ro_x_cnt);
-    ila_ro_y_cnt <= std_logic_vector(ro_y_cnt);
 
     wr_fifo_rst    <= not hdmi_resetn;
     rd_fifo_rst_int <= mig_rst or rd_fifo_flush;
