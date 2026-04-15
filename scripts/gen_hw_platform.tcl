@@ -5,7 +5,7 @@
 # Default values
 set origin_dir "."
 set proj_name "vivado_project"
-set jobs 4
+set jobs 30
 
 # --------------------------------------------
 # Parse arguments

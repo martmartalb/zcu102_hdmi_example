@@ -1,28 +1,17 @@
 `timescale 1ns / 1ps
 
-module ddr4_frame_buffer_tb;
+module vdma_frame_buffer_tb;
 
     // ---------------------------------------------------------------
-    // Parameters
-    // ---------------------------------------------------------------
-    localparam APP_ADDR_WIDTH = 28;
-    localparam APP_DATA_WIDTH = 128;
-    localparam APP_MASK_WIDTH = 16;
-
-    // ---------------------------------------------------------------
-    // Clocks — asynchronous, both ~300 MHz
+    // Clock — single domain (no more MIG clock!)
     // ---------------------------------------------------------------
     logic hdmi_clk = 0;
-    logic mig_clk  = 0;
-
-    always #5 hdmi_clk = ~hdmi_clk;  // ~300 MHz
-    always #5.1 mig_clk  = ~mig_clk;   // ~300 MHz (slightly different)
+    always #5 hdmi_clk = ~hdmi_clk;  // ~300 MHz (3.33 ns half-period)
 
     // ---------------------------------------------------------------
-    // Resets
+    // Reset
     // ---------------------------------------------------------------
     logic hdmi_resetn = 0;
-    logic mig_rst     = 1;
 
     // ---------------------------------------------------------------
     // Switches
@@ -31,7 +20,7 @@ module ddr4_frame_buffer_tb;
     logic sw_read = 0;
 
     // ---------------------------------------------------------------
-    // AXI Stream: bram_image_streamer → ddr4_frame_buffer (S_AXIS)
+    // AXI Stream: bram_image_streamer → DUT (S_AXIS)
     // ---------------------------------------------------------------
     logic [47:0] s_axis_tdata;
     logic        s_axis_tvalid;
@@ -40,7 +29,7 @@ module ddr4_frame_buffer_tb;
     logic        s_axis_tready;
 
     // ---------------------------------------------------------------
-    // AXI Stream: ddr4_frame_buffer → TX sink (M_AXIS)
+    // AXI Stream: DUT → TX sink (M_AXIS)
     // ---------------------------------------------------------------
     logic [47:0] m_axis_tdata;
     logic        m_axis_tvalid;
@@ -49,21 +38,27 @@ module ddr4_frame_buffer_tb;
     logic        m_axis_tready;
 
     // ---------------------------------------------------------------
-    // MIG app interface
+    // AXI Stream: DUT → VDMA model S2MM
     // ---------------------------------------------------------------
-    logic [APP_ADDR_WIDTH-1:0] app_addr;
-    logic [2:0]                app_cmd;
-    logic                      app_en;
-    logic [APP_DATA_WIDTH-1:0] app_wdf_data;
-    logic                      app_wdf_end;
-    logic [APP_MASK_WIDTH-1:0] app_wdf_mask;
-    logic                      app_wdf_wren;
-    logic                      app_rdy;
-    logic                      app_wdf_rdy;
-    logic [APP_DATA_WIDTH-1:0] app_rd_data;
-    logic                      app_rd_data_valid;
-    logic                      app_rd_data_end;
-    logic                      init_calib_complete;
+    logic [47:0] vdma_s2mm_tdata;
+    logic        vdma_s2mm_tvalid;
+    logic        vdma_s2mm_tlast;
+    logic [0:0]  vdma_s2mm_tuser;
+    logic        vdma_s2mm_tready;
+
+    // ---------------------------------------------------------------
+    // AXI Stream: VDMA model MM2S → DUT
+    // ---------------------------------------------------------------
+    logic [47:0] vdma_mm2s_tdata;
+    logic        vdma_mm2s_tvalid;
+    logic        vdma_mm2s_tlast;
+    logic [0:0]  vdma_mm2s_tuser;
+    logic        vdma_mm2s_tready;
+
+    // ---------------------------------------------------------------
+    // VDMA status
+    // ---------------------------------------------------------------
+    logic frame_stored;
 
     // ---------------------------------------------------------------
     // DUT: bram_image_streamer (AXI Stream source)
@@ -81,89 +76,73 @@ module ddr4_frame_buffer_tb;
     );
 
     // ---------------------------------------------------------------
-    // MIG model
+    // VDMA behavioral model
     // ---------------------------------------------------------------
-    mig_model #(
-        .APP_ADDR_WIDTH (APP_ADDR_WIDTH),
-        .APP_DATA_WIDTH (APP_DATA_WIDTH),
-        .APP_MASK_WIDTH (APP_MASK_WIDTH),
-        .MEM_INIT_FILE  ("src/data/image.mem"),
-        .MEM_INIT_DEPTH (1_036_800),
-        .MEM_DEPTH      (1_036_800),
-        .RD_LATENCY     (8)
-    ) u_mig (
-        .clk                (mig_clk),
-        .rst                (mig_rst),
-        .init_calib_complete(init_calib_complete),
-        .app_addr           (app_addr),
-        .app_cmd            (app_cmd),
-        .app_en             (app_en),
-        .app_rdy            (app_rdy),
-        .app_wdf_data       (app_wdf_data),
-        .app_wdf_end        (app_wdf_end),
-        .app_wdf_mask       (app_wdf_mask),
-        .app_wdf_wren       (app_wdf_wren),
-        .app_wdf_rdy        (app_wdf_rdy),
-        .app_rd_data        (app_rd_data),
-        .app_rd_data_valid  (app_rd_data_valid),
-        .app_rd_data_end    (app_rd_data_end)
+    vdma_model #(
+        .MEM_DEPTH (1_036_800),
+        .H_SIZE    (960),
+        .V_SIZE    (1080)
+    ) u_vdma (
+        .clk          (hdmi_clk),
+        .resetn       (hdmi_resetn),
+        .s2mm_tdata   (vdma_s2mm_tdata),
+        .s2mm_tvalid  (vdma_s2mm_tvalid),
+        .s2mm_tlast   (vdma_s2mm_tlast),
+        .s2mm_tuser   (vdma_s2mm_tuser),
+        .s2mm_tready  (vdma_s2mm_tready),
+        .mm2s_tdata   (vdma_mm2s_tdata),
+        .mm2s_tvalid  (vdma_mm2s_tvalid),
+        .mm2s_tlast   (vdma_mm2s_tlast),
+        .mm2s_tuser   (vdma_mm2s_tuser),
+        .mm2s_tready  (vdma_mm2s_tready),
+        .frame_stored (frame_stored)
     );
 
     // ---------------------------------------------------------------
-    // DUT: ddr4_frame_buffer
+    // DUT: vdma_frame_buffer (stream switch)
     // ---------------------------------------------------------------
-    ddr4_frame_buffer #(
-        .APP_ADDR_WIDTH (APP_ADDR_WIDTH),
-        .APP_DATA_WIDTH (APP_DATA_WIDTH),
-        .APP_MASK_WIDTH (APP_MASK_WIDTH),
-        .BASE_ADDR      (28'h0000000)
-    ) u_dut (
-        .hdmi_clk           (hdmi_clk),
-        .hdmi_resetn        (hdmi_resetn),
+    vdma_frame_buffer u_dut (
+        .hdmi_clk        (hdmi_clk),
+        .hdmi_resetn     (hdmi_resetn),
 
-        .S_AXIS_tdata       (s_axis_tdata),
-        .S_AXIS_tvalid      (s_axis_tvalid),
-        .S_AXIS_tlast       (s_axis_tlast),
-        .S_AXIS_tuser       (s_axis_tuser),
-        .S_AXIS_tready      (s_axis_tready),
+        .S_AXIS_tdata    (s_axis_tdata),
+        .S_AXIS_tvalid   (s_axis_tvalid),
+        .S_AXIS_tlast    (s_axis_tlast),
+        .S_AXIS_tuser    (s_axis_tuser),
+        .S_AXIS_tready   (s_axis_tready),
 
-        .M_AXIS_tdata       (m_axis_tdata),
-        .M_AXIS_tvalid      (m_axis_tvalid),
-        .M_AXIS_tlast       (m_axis_tlast),
-        .M_AXIS_tuser       (m_axis_tuser),
-        .M_AXIS_tready      (m_axis_tready),
+        .M_AXIS_tdata    (m_axis_tdata),
+        .M_AXIS_tvalid   (m_axis_tvalid),
+        .M_AXIS_tlast    (m_axis_tlast),
+        .M_AXIS_tuser    (m_axis_tuser),
+        .M_AXIS_tready   (m_axis_tready),
 
-        .sw_save            (sw_save),
-        .sw_read            (sw_read),
+        .VDMA_S2MM_tdata  (vdma_s2mm_tdata),
+        .VDMA_S2MM_tvalid (vdma_s2mm_tvalid),
+        .VDMA_S2MM_tlast  (vdma_s2mm_tlast),
+        .VDMA_S2MM_tuser  (vdma_s2mm_tuser),
+        .VDMA_S2MM_tready (vdma_s2mm_tready),
 
-        .mig_clk            (mig_clk),
-        .mig_rst            (mig_rst),
-        .init_calib_complete(init_calib_complete),
+        .VDMA_MM2S_tdata  (vdma_mm2s_tdata),
+        .VDMA_MM2S_tvalid (vdma_mm2s_tvalid),
+        .VDMA_MM2S_tlast  (vdma_mm2s_tlast),
+        .VDMA_MM2S_tuser  (vdma_mm2s_tuser),
+        .VDMA_MM2S_tready (vdma_mm2s_tready),
 
-        .app_addr           (app_addr),
-        .app_cmd            (app_cmd),
-        .app_en             (app_en),
-        .app_wdf_data       (app_wdf_data),
-        .app_wdf_end        (app_wdf_end),
-        .app_wdf_mask       (app_wdf_mask),
-        .app_wdf_wren       (app_wdf_wren),
-        .app_rdy            (app_rdy),
-        .app_wdf_rdy        (app_wdf_rdy),
-        .app_rd_data        (app_rd_data),
-        .app_rd_data_valid  (app_rd_data_valid),
-        .app_rd_data_end    (app_rd_data_end)
+        .sw_save          (sw_save),
+        .sw_read          (sw_read)
     );
 
     // ---------------------------------------------------------------
-    // Write transaction counter (MIG domain)
+    // VDMA S2MM write counter
     // ---------------------------------------------------------------
-    int wr_count = 0;
+    int s2mm_xfer_count = 0;
 
-    always @(posedge mig_clk) begin
-        if (app_en && app_rdy && app_wdf_wren && app_wdf_rdy && app_cmd == 3'b000) begin
-            wr_count++;
-            if (wr_count % 100000 == 0)
-                $display("Time=%0t | MIG writes: %0d | addr=0x%h", $time, wr_count, app_addr);
+    always @(posedge hdmi_clk) begin
+        if (vdma_s2mm_tvalid && vdma_s2mm_tready) begin
+            s2mm_xfer_count++;
+            if (s2mm_xfer_count % 100000 == 0)
+                $display("Time=%0t | VDMA S2MM writes: %0d", $time, s2mm_xfer_count);
         end
     end
 
@@ -243,7 +222,7 @@ module ddr4_frame_buffer_tb;
     // ---------------------------------------------------------------
     // AXI Stream protocol checker during read playback
     // ---------------------------------------------------------------
-    int rd_proto_xfer   = 0;   // transfer index within frame
+    int rd_proto_xfer   = 0;
     bit rd_proto_active = 0;
 
     always @(posedge hdmi_clk) begin
@@ -270,35 +249,29 @@ module ddr4_frame_buffer_tb;
     // Stimulus
     // ---------------------------------------------------------------
     initial begin
-        $display("=== ddr4_frame_buffer_tb START ===");
+        $display("=== vdma_frame_buffer_tb START ===");
 
-        // Hold resets
+        // Hold reset
         hdmi_resetn = 0;
-        mig_rst     = 1;
         sw_save     = 0;
         sw_read     = 0;
 
-        // Assert resets for 100 ns
+        // Assert reset for 100 ns
         #100;
 
-        // Deassert resets
+        // Deassert reset
         hdmi_resetn = 1;
-        mig_rst     = 0;
-        $display("Time=%0t | Resets deasserted", $time);
-
-        // Wait for MIG calibration (handled by mig_model)
-        wait(init_calib_complete);
-        $display("Time=%0t | init_calib_complete asserted", $time);
+        $display("Time=%0t | Reset deasserted", $time);
         #50;
 
-        // Start save: sw_save ON
+        // Start capture: sw_save ON
         sw_save = 1;
         $display("Time=%0t | sw_save = 1 (start capture)", $time);
-        #50;
 
-        // Wait for capture to complete
-        wait(wr_count == 1036800);
-        $display("Time=%0t | All %0d MIG writes completed", $time, wr_count);
+        // Wait for VDMA model to store a complete frame
+        wait(frame_stored);
+        $display("Time=%0t | Frame stored in VDMA memory", $time);
+        $display("Time=%0t | S2MM writes: %0d", $time, s2mm_xfer_count);
         $display("Time=%0t | S_AXIS: %0d transfers, %0d frames", $time, s_axis_xfer_count, s_axis_frame_count);
         $display("Time=%0t | M_AXIS: %0d transfers, %0d frames", $time, m_axis_xfer_count, m_axis_frame_count);
 
@@ -314,13 +287,13 @@ module ddr4_frame_buffer_tb;
 
         // Reset M_AXIS counter and enable checkers
         @(posedge hdmi_clk);
-        m_axis_xfer_count = 0;
+        m_axis_xfer_count  = 0;
         m_axis_frame_count = 0;
-        rd_check_idx      = 0;
-        rd_mismatch_count = 0;
-        rd_checking       = 1;
-        rd_proto_xfer     = 0;
-        rd_proto_active   = 1;
+        rd_check_idx       = 0;
+        rd_mismatch_count  = 0;
+        rd_checking        = 1;
+        rd_proto_xfer      = 0;
+        rd_proto_active    = 1;
 
         wait(m_axis_xfer_count >= 1036800);
         rd_checking = 0;
@@ -333,7 +306,7 @@ module ddr4_frame_buffer_tb;
             $display("FAIL: %0d mismatches detected.", rd_mismatch_count);
 
         #20000;
-        $display("=== ddr4_frame_buffer_tb DONE ===");
+        $display("=== vdma_frame_buffer_tb DONE ===");
         $finish;
     end
 
