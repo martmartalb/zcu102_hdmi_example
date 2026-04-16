@@ -28,14 +28,14 @@ entity vdma_frame_buffer_top is
         HDMI_S_AXIS_tdata         : in  std_logic_vector(47 downto 0);
         HDMI_S_AXIS_tvalid        : in  std_logic;
         HDMI_S_AXIS_tlast         : in  std_logic;
-        HDMI_S_AXIS_tuser         : in  std_logic;
+        HDMI_S_AXIS_tuser         : in  std_logic_vector(0 downto 0);
         HDMI_S_AXIS_tready        : out std_logic;
 
         -- AXI Stream Master (to HDMI TX)
         HDMI_M_AXIS_tdata         : out std_logic_vector(47 downto 0);
         HDMI_M_AXIS_tvalid        : out std_logic;
         HDMI_M_AXIS_tlast         : out std_logic;
-        HDMI_M_AXIS_tuser         : out std_logic;
+        HDMI_M_AXIS_tuser         : out std_logic_vector(0 downto 0);
         HDMI_M_AXIS_tready        : in  std_logic;
 
         -- AXI Stream Master → VDMA S2MM (capture: video → DDR4)
@@ -147,7 +147,6 @@ begin
         port map (
             aclk                => hdmi_clk,
             aresetn             => hdmi_resetn,
-            init_calib_complete => init_calib_complete,
 
             m_axi_lite_awaddr   => M_AXI_LITE_awaddr,
             m_axi_lite_awvalid  => M_AXI_LITE_awvalid,

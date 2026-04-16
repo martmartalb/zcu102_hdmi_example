@@ -155,7 +155,7 @@ begin
                 if sw_read_sync = sw_read_deb then
                     sw_read_deb_cnt <= (others => '0');
                 elsif sw_read_deb_cnt = C_DEBOUNCE_MAX then
-                    sw_read_sync     <= sw_read;
+                    sw_read_deb     <= sw_read_sync;
                     sw_read_deb_cnt <= (others => '0');
                 else
                     sw_read_deb_cnt <= sw_read_deb_cnt + 1;

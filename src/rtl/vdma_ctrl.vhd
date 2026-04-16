@@ -3,10 +3,10 @@
 -- Description: AXI4-Lite master controller that configures the AXI VDMA IP
 --              entirely from PL logic — no PS software required.
 --
---              After the MIG reports init_calib_complete, this module programs
---              the VDMA S2MM and MM2S channel registers through a sequence of
---              AXI4-Lite write transactions, then starts both channels in
---              circular mode.
+--              After reset is released (which is gated by MIG init_calib_complete),
+--              this module programs the VDMA S2MM and MM2S channel registers
+--              through a sequence of AXI4-Lite write transactions, then starts
+--              both channels in circular mode.
 --
 -- Register map (PG020 AXI VDMA v6.3):
 --   0x00  MM2S_VDMACR           0x30  S2MM_VDMACR
@@ -32,7 +32,10 @@ entity vdma_ctrl is
     port (
         aclk                : in  std_logic;
         aresetn             : in  std_logic;
-        init_calib_complete : in  std_logic;
+
+        -- Status outputs
+        cfg_done            : out std_logic;
+        cfg_error           : out std_logic;
 
         -- AXI4-Lite Master Interface
         m_axi_lite_awaddr   : out std_logic_vector(31 downto 0);
@@ -72,41 +75,46 @@ architecture rtl of vdma_ctrl is
     type cfg_rom_t is array (0 to NUM_WRITES - 1) of cfg_entry_t;
 
     -- VDMACR: bit 0 = RS (Run/Stop), bit 1 = Circular_Park (1 = circular)
-    constant DMACR_RUN_CIRC : std_logic_vector(31 downto 0) := x"00000003";
+    constant DMACR_RUN_CIRC : std_logic_vector(31 downto 0) := x"00010083";
 
     constant CFG_ROM : cfg_rom_t := (
         -- S2MM channel (capture to DDR4) — configure before VSIZE trigger
         0 => (addr => x"000000AC", data => FRAME_BASE_ADDR),   -- S2MM start addr
         1 => (addr => x"000000A8", data => STRIDE),            -- S2MM stride
         2 => (addr => x"000000A4", data => HSIZE),             -- S2MM hsize
-        3 => (addr => x"00000030", data => DMACR_RUN_CIRC),    -- S2MM DMACR
-        4 => (addr => x"000000A0", data => VSIZE),             -- S2MM vsize (START)
+        3 => (addr => x"000000A0", data => VSIZE),             -- S2MM vsize
+        4 => (addr => x"00000030", data => DMACR_RUN_CIRC),    -- S2MM DMACR (START)
         -- MM2S channel (playback from DDR4)
         5 => (addr => x"0000005C", data => FRAME_BASE_ADDR),   -- MM2S start addr
         6 => (addr => x"00000058", data => STRIDE),            -- MM2S stride
         7 => (addr => x"00000054", data => HSIZE),             -- MM2S hsize
-        8 => (addr => x"00000000", data => DMACR_RUN_CIRC),    -- MM2S DMACR
-        9 => (addr => x"00000050", data => VSIZE)              -- MM2S vsize (START)
+        8 => (addr => x"00000050", data => VSIZE),             -- MM2S vsize
+        9 => (addr => x"00000000", data => DMACR_RUN_CIRC)     -- MM2S DMACR (START)
     );
 
     ---------------------------------------------------------------------------
-    -- init_calib_complete synchronizer (MIG clock → AXI-Lite clock)
+    -- FSM States
     ---------------------------------------------------------------------------
-    signal calib_meta : std_logic := '0';
-    signal calib_sync : std_logic := '0';
-
-    attribute ASYNC_REG : string;
-    attribute ASYNC_REG of calib_meta : signal is "TRUE";
-    attribute ASYNC_REG of calib_sync : signal is "TRUE";
+    type state_t is (S_START, S_WRITE_ADDR, S_WAIT_BRESP, S_DONE);
+    signal state : state_t := S_START;
 
     ---------------------------------------------------------------------------
-    -- FSM
+    -- AXI4-Lite internal signals
     ---------------------------------------------------------------------------
-    type state_t is (S_WAIT_CALIB, S_WRITE, S_WAIT_BRESP, S_DONE);
-    signal state   : state_t := S_WAIT_CALIB;
-    signal wr_idx  : integer range 0 to NUM_WRITES - 1 := 0;
-    signal aw_done : std_logic := '0';
-    signal w_done  : std_logic := '0';
+    signal axi_awvalid : std_logic := '0';
+    signal axi_awaddr  : std_logic_vector(31 downto 0) := (others => '0');
+    signal axi_wvalid  : std_logic := '0';
+    signal axi_wdata   : std_logic_vector(31 downto 0) := (others => '0');
+    signal axi_bready  : std_logic := '0';
+
+    ---------------------------------------------------------------------------
+    -- Transaction tracking
+    ---------------------------------------------------------------------------
+    signal wr_idx        : integer range 0 to NUM_WRITES := 0;
+    signal aw_accepted   : std_logic := '0';
+    signal w_accepted    : std_logic := '0';
+    signal write_resp_error : std_logic := '0';
+    signal error_reg     : std_logic := '0';
 
 begin
 
@@ -118,112 +126,126 @@ begin
     m_axi_lite_arprot  <= "000";
     m_axi_lite_rready  <= '0';
 
-    -- Write protection: unprivileged, secure, data access
+    ---------------------------------------------------------------------------
+    -- Connect internal signals to outputs
+    ---------------------------------------------------------------------------
+    m_axi_lite_awaddr  <= axi_awaddr;
+    m_axi_lite_awvalid <= axi_awvalid;
     m_axi_lite_awprot  <= "000";
-
-    -- Write strobe: always write all 4 bytes
+    m_axi_lite_wdata   <= axi_wdata;
+    m_axi_lite_wvalid  <= axi_wvalid;
     m_axi_lite_wstrb   <= "1111";
+    m_axi_lite_bready  <= axi_bready;
+
+    -- Status outputs
+    cfg_done  <= '1' when state = S_DONE else '0';
+    cfg_error <= error_reg;
 
     ---------------------------------------------------------------------------
-    -- Synchronize init_calib_complete
+    -- Flag write response errors (BRESP[1] indicates SLVERR or DECERR)
     ---------------------------------------------------------------------------
-    p_sync_calib : process(aclk)
+    write_resp_error <= axi_bready and m_axi_lite_bvalid and m_axi_lite_bresp(1);
+
+    ---------------------------------------------------------------------------
+    -- Error register: capture any write response errors
+    ---------------------------------------------------------------------------
+    p_error_reg : process(aclk)
     begin
         if rising_edge(aclk) then
             if aresetn = '0' then
-                calib_meta <= '0';
-                calib_sync <= '0';
-            else
-                calib_meta <= init_calib_complete;
-                calib_sync <= calib_meta;
+                error_reg <= '0';
+            elsif write_resp_error = '1' then
+                error_reg <= '1';
             end if;
         end if;
     end process;
 
     ---------------------------------------------------------------------------
-    -- AXI4-Lite write FSM
+    -- Main AXI4-Lite Write FSM
     ---------------------------------------------------------------------------
     p_fsm : process(aclk)
     begin
         if rising_edge(aclk) then
             if aresetn = '0' then
-                state              <= S_WAIT_CALIB;
-                wr_idx             <= 0;
-                aw_done            <= '0';
-                w_done             <= '0';
-                m_axi_lite_awaddr  <= (others => '0');
-                m_axi_lite_awvalid <= '0';
-                m_axi_lite_wdata   <= (others => '0');
-                m_axi_lite_wvalid  <= '0';
-                m_axi_lite_bready  <= '0';
+                state        <= S_START;
+                wr_idx       <= 0;
+                aw_accepted  <= '0';
+                w_accepted   <= '0';
+                axi_awvalid  <= '0';
+                axi_awaddr   <= (others => '0');
+                axi_wvalid   <= '0';
+                axi_wdata    <= (others => '0');
+                axi_bready   <= '0';
             else
                 case state is
 
                     -------------------------------------------------------
-                    -- Wait for MIG calibration
+                    -- S_START: Begin first transaction immediately
                     -------------------------------------------------------
-                    when S_WAIT_CALIB =>
-                        if calib_sync = '1' then
-                            m_axi_lite_awaddr  <= CFG_ROM(0).addr;
-                            m_axi_lite_awvalid <= '1';
-                            m_axi_lite_wdata   <= CFG_ROM(0).data;
-                            m_axi_lite_wvalid  <= '1';
-                            aw_done <= '0';
-                            w_done  <= '0';
-                            state   <= S_WRITE;
+                    when S_START =>
+                        axi_awaddr  <= CFG_ROM(wr_idx).addr;
+                        axi_awvalid <= '1';
+                        axi_wdata   <= CFG_ROM(wr_idx).data;
+                        axi_wvalid  <= '1';
+                        aw_accepted <= '0';
+                        w_accepted  <= '0';
+                        wr_idx      <= wr_idx + 1;
+                        state       <= S_WRITE_ADDR;
+
+                    -------------------------------------------------------
+                    -- S_WRITE_ADDR: Handle address/data channel handshakes
+                    -------------------------------------------------------
+                    when S_WRITE_ADDR =>
+                        -- Write address channel handshake
+                        if axi_awvalid = '1' and m_axi_lite_awready = '1' then
+                            axi_awvalid <= '0';
+                            aw_accepted <= '1';
+                        end if;
+
+                        -- Write data channel handshake
+                        if axi_wvalid = '1' and m_axi_lite_wready = '1' then
+                            axi_wvalid <= '0';
+                            w_accepted <= '1';
+                        end if;
+
+                        -- Both channels completed handshake
+                        if ((aw_accepted = '1') or (axi_awvalid = '1' and m_axi_lite_awready = '1')) and
+                           ((w_accepted  = '1') or (axi_wvalid  = '1' and m_axi_lite_wready  = '1')) then
+                            axi_awvalid <= '0';
+                            axi_wvalid  <= '0';
+                            axi_bready  <= '1';
+                            state       <= S_WAIT_BRESP;
                         end if;
 
                     -------------------------------------------------------
-                    -- Issue address + data simultaneously
-                    -------------------------------------------------------
-                    when S_WRITE =>
-                        -- Address channel accepted?
-                        if m_axi_lite_awvalid = '1' and m_axi_lite_awready = '1' then
-                            m_axi_lite_awvalid <= '0';
-                            aw_done <= '1';
-                        end if;
-
-                        -- Data channel accepted?
-                        if m_axi_lite_wvalid = '1' and m_axi_lite_wready = '1' then
-                            m_axi_lite_wvalid <= '0';
-                            w_done <= '1';
-                        end if;
-
-                        -- Both accepted → wait for write response
-                        if (aw_done = '1' or (m_axi_lite_awvalid = '1' and m_axi_lite_awready = '1')) and
-                           (w_done  = '1' or (m_axi_lite_wvalid  = '1' and m_axi_lite_wready  = '1')) then
-                            m_axi_lite_awvalid <= '0';
-                            m_axi_lite_wvalid  <= '0';
-                            m_axi_lite_bready  <= '1';
-                            state <= S_WAIT_BRESP;
-                        end if;
-
-                    -------------------------------------------------------
-                    -- Consume write response, advance to next register
+                    -- S_WAIT_BRESP: Wait for write response, advance index
                     -------------------------------------------------------
                     when S_WAIT_BRESP =>
-                        if m_axi_lite_bvalid = '1' then
-                            m_axi_lite_bready <= '0';
+                        if m_axi_lite_bvalid = '1' and axi_bready = '1' then
+                            axi_bready <= '0';
 
-                            if wr_idx < NUM_WRITES - 1 then
-                                wr_idx <= wr_idx + 1;
-                                m_axi_lite_awaddr  <= CFG_ROM(wr_idx + 1).addr;
-                                m_axi_lite_awvalid <= '1';
-                                m_axi_lite_wdata   <= CFG_ROM(wr_idx + 1).data;
-                                m_axi_lite_wvalid  <= '1';
-                                aw_done <= '0';
-                                w_done  <= '0';
-                                state   <= S_WRITE;
+                            if wr_idx < NUM_WRITES then
+                                axi_awaddr  <= CFG_ROM(wr_idx).addr;
+                                axi_awvalid <= '1';
+                                axi_wdata   <= CFG_ROM(wr_idx).data;
+                                axi_wvalid  <= '1';
+                                aw_accepted <= '0';
+                                w_accepted  <= '0';
+                                wr_idx      <= wr_idx + 1;
+                                state       <= S_WRITE_ADDR;
                             else
-                                state <= S_DONE;
+                                state  <= S_DONE;
                             end if;
                         end if;
 
                     -------------------------------------------------------
-                    -- Configuration complete — idle forever
+                    -- S_DONE: Configuration complete
                     -------------------------------------------------------
                     when S_DONE =>
                         null;
+
+                    when others =>
+                        state <= S_START;
 
                 end case;
             end if;
