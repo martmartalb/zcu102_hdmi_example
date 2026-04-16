@@ -16,23 +16,6 @@
 #
 #*****************************************************************************************
 
-# Check file required for this script exists
-proc checkRequiredFiles { origin_dir} {
-  set status true
-  set files [list \
- "[file normalize "$origin_dir/src/constraints/hdmi_example_zcu102.xdc"]"\
- "[file normalize "$origin_dir/src/rtl/bram_image_streamer.vhd"]"\
- "[file normalize "$origin_dir/src/data/image.mem"]"\
-  ]
-  foreach ifile $files {
-    if { ![file isfile $ifile] } {
-      puts " Could not find local file $ifile "
-      set status false
-    }
-  }
-
-  return $status
-}
 # Set the reference directory for source file relative paths (by default the value is script directory path)
 set origin_dir "."
 
@@ -100,17 +83,6 @@ if { $::argc > 0 } {
 # Set the directory path for the original project from where this script was exported
 set orig_proj_dir "[file normalize "$origin_dir/"]"
 
-# Check for paths and files needed for project creation
-set validate_required 0
-if { $validate_required } {
-  if { [checkRequiredFiles $origin_dir] } {
-    puts "Tcl file $script_file is valid. All files required for project creation is accesable. "
-  } else {
-    puts "Tcl file $script_file is not valid. Not all files required for project creation is accesable. "
-    return
-  }
-}
-
 # Create project
 create_project ${_xil_proj_name_} ./${_xil_proj_name_} -part xczu9eg-ffvb1156-2-e -force
 
@@ -150,22 +122,13 @@ if {[string equal [get_filesets -quiet sources_1] ""]} {
 # Set 'sources_1' fileset object
 set obj [get_filesets sources_1]
 set files [list \
- [file normalize "${origin_dir}/src/rtl/bram_image_streamer.vhd"] \
  [file normalize "${origin_dir}/src/rtl/vdma_frame_buffer_top.vhd"] \
  [file normalize "${origin_dir}/src/rtl/vdma_frame_buffer.vhd"] \
  [file normalize "${origin_dir}/src/rtl/vdma_ctrl.vhd"] \
- [file normalize "${origin_dir}/src/data/image.mem"] \
 ]
 add_files -norecurse -fileset $obj $files
 
 # Set 'sources_1' fileset file properties for remote files
-set file "${origin_dir}/src/rtl/bram_image_streamer.vhd"
-set file [file normalize $file]
-set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
-set_property -name "used_in" -value "synthesis implementation" -objects $file_obj
-set_property -name "used_in_simulation" -value "0" -objects $file_obj
-set_property -name "file_type" -value "VHDL" -objects $file_obj
-
 set file "${origin_dir}/src/rtl/vdma_frame_buffer_top.vhd"
 set file [file normalize $file]
 set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
@@ -186,12 +149,6 @@ set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
 set_property -name "used_in" -value "synthesis implementation" -objects $file_obj
 set_property -name "used_in_simulation" -value "0" -objects $file_obj
 set_property -name "file_type" -value "VHDL" -objects $file_obj
-
-set file "$origin_dir/src/data/image.mem"
-set file [file normalize $file]
-set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
-set_property -name "file_type" -value "Memory Initialization Files" -objects $file_obj
-
 
 # No standalone IP cores — VDMA is instantiated in the block design
 
@@ -575,10 +532,6 @@ move_dashboard_gadget -name {methodology_1} -row 2 -col 1
 #*****************************************************************************************
 
 source scripts/create_root_design.tcl
-
-# Set the absolute path to image.mem on the IP instance
-# set mem_path [get_files image.mem]
-# set_property -dict [list CONFIG.MEM_INIT_FILE $mem_path] [get_bd_cells bram_image_streamer_0]
 
 set_property REGISTERED_WITH_MANAGER "1" [get_files exdes.bd ] 
 set_property SYNTH_CHECKPOINT_MODE "Hierarchical" [get_files exdes.bd ] 

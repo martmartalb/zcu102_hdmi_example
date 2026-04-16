@@ -143,19 +143,19 @@ xilinx.com:ip:axis_register_slice:1.1\
 xilinx.com:ip:v_hdmi_tx_ss:3.2\
 xilinx.com:ip:v_hdmi_rx_ss:3.2\
 xilinx.com:ip:util_ds_buf:2.2\
+xilinx.com:ip:ddr4:2.2\
+xilinx.com:ip:axi_vdma:6.3\
+xilinx.com:ip:smartconnect:1.0\
+xilinx.com:ip:proc_sys_reset:5.0\
 xilinx.com:ip:system_ila:1.1\
 xilinx.com:ip:v_tpg:8.2\
 xilinx.com:ip:axi_gpio:2.0\
-xilinx.com:ip:smartconnect:1.0\
 xilinx.com:ip:clk_wiz:6.0\
 xilinx.com:ip:aud_pat_gen:1.0\
 xilinx.com:ip:hdmi_acr_ctrl:1.0\
 xilinx.com:inline_hdl:ilconcat:1.0\
 xilinx.com:ip:zynq_ultra_ps_e:3.5\
 xilinx.com:ip:axi_iic:2.1\
-xilinx.com:ip:proc_sys_reset:5.0\
-xilinx.com:ip:ddr4:2.2\
-xilinx.com:ip:axi_vdma:6.3\
 "
 
    set list_ips_missing ""
@@ -180,7 +180,7 @@ xilinx.com:ip:axi_vdma:6.3\
 ##################################################################
 set bCheckModules 1
 if { $bCheckModules == 1 } {
-   set list_check_mods "\
+   set list_check_mods "\ 
 vdma_frame_buffer_top\
 "
 
@@ -1003,6 +1003,13 @@ proc create_root_design { parentCell } {
    CONFIG.FREQ_HZ {156250000} \
    ] $DRU_CLK_IN
 
+  set ddr4_sdram_075 [ create_bd_intf_port -mode Master -vlnv xilinx.com:interface:ddr4_rtl:1.0 ddr4_sdram_075 ]
+
+  set user_si570_sysclk [ create_bd_intf_port -mode Slave -vlnv xilinx.com:interface:diff_clock_rtl:1.0 user_si570_sysclk ]
+  set_property -dict [ list \
+   CONFIG.FREQ_HZ {300000000} \
+   ] $user_si570_sysclk
+
 
   # Create ports
   set TX_HPD_IN [ create_bd_port -dir I TX_HPD_IN ]
@@ -1028,10 +1035,6 @@ proc create_root_design { parentCell } {
   set SI5324_RST_OUT [ create_bd_port -dir O -from 0 -to 0 SI5324_RST_OUT ]
   set SI5324_LOL_IN [ create_bd_port -dir I SI5324_LOL_IN ]
   set LED0 [ create_bd_port -dir O LED0 ]
-  # Note: DDR4 and system-clock interface ports (ddr4_sdram_075 and
-  # user_si570_sysclk) are created automatically by apply_board_connection
-  # on ddr4_0 further down — the ZCU102 3.4 board file supplies pin
-  # locations, IOSTANDARDs and the 300 MHz create_clock constraint.
   set sw_save [ create_bd_port -dir I sw_save ]
   set sw_read [ create_bd_port -dir I sw_read ]
 
@@ -1136,74 +1139,47 @@ proc create_root_design { parentCell } {
   create_hier_cell_zynq_us_ss_0 [current_bd_instance .] zynq_us_ss_0
 
   # Create instance: ddr4_0, and set properties
-  #
-  # The ZCU102 3.4 board file has a DDR4 preset (`ddr4_sdram_preset_075`)
-  # that supplies the memory-specific parameters automatically when the
-  # board connection is applied below:
-  #   CONFIG.C0.DDR4_MemoryPart       = MT40A256M16GE-075E
-  #   CONFIG.C0.DDR4_DataWidth        = 16
-  #   CONFIG.C0.DDR4_TimePeriod       = 833   (DDR4-2400, 1200 MHz)
-  #   CONFIG.C0.DDR4_InputClockPeriod = 3332  (300 MHz SI570 sys clock)
-  #
-  # We only override the parameters the board preset does NOT set —
-  # AXI interface + reset polarity + differential sys-clock mode.
   set ddr4_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:ddr4:2.2 ddr4_0 ]
   set_property -dict [list \
-    CONFIG.C0.DDR4_DataMask          {DM_NO_DBI} \
-    CONFIG.C0.DDR4_Mem_Add_Map       {ROW_COLUMN_BANK} \
-    CONFIG.C0.DDR4_AxiSelection      {true} \
-    CONFIG.C0.DDR4_AxiDataWidth      {64} \
-    CONFIG.C0.DDR4_AxiAddressWidth   {29} \
-    CONFIG.C0.DDR4_AxiIDWidth        {4} \
-    CONFIG.C0.DDR4_Sys_Rst_Polarity  {ACTIVE_LOW} \
-    CONFIG.System_Clock              {Differential} \
+    CONFIG.C0.DDR4_AxiAddressWidth {29} \
+    CONFIG.C0.DDR4_AxiIDWidth {4} \
+    CONFIG.C0.DDR4_DataMask {DM_NO_DBI} \
+    CONFIG.C0.DDR4_Mem_Add_Map {ROW_COLUMN_BANK} \
+    CONFIG.C0_CLOCK_BOARD_INTERFACE {user_si570_sysclk} \
+    CONFIG.C0_DDR4_BOARD_INTERFACE {ddr4_sdram_075} \
+    CONFIG.System_Clock {Differential} \
   ] $ddr4_0
-
-  # Tie DDR4 IP to the ZCU102 board preset — this creates the external
-  # ddr4_sdram_075 and user_si570_sysclk interface ports on the block
-  # design, applies the MT40A256M16GE-075E memory preset, and supplies
-  # the pin locations, IOSTANDARDs and sys-clock create_clock
-  # constraint from the board file (no manual XDC for DDR4 needed).
-  apply_board_connection -board_interface "ddr4_sdram_075" \
-                         -ip_intf "ddr4_0/C0_DDR4" \
-                         -diagram [current_bd_design]
-  apply_board_connection -board_interface "user_si570_sysclk" \
-                         -ip_intf "ddr4_0/C0_SYS_CLK" \
-                         -diagram [current_bd_design]
 
 
   # Create instance: axi_vdma_0, and set properties
   set axi_vdma_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_vdma:6.3 axi_vdma_0 ]
   set_property -dict [list \
-    CONFIG.c_m_axi_mm2s_data_width {128} \
-    CONFIG.c_m_axis_mm2s_tdata_width {48} \
-    CONFIG.c_m_axi_s2mm_data_width {128} \
-    CONFIG.c_s_axis_s2mm_tdata_width {48} \
     CONFIG.c_include_mm2s {1} \
-    CONFIG.c_include_s2mm {1} \
     CONFIG.c_include_mm2s_dre {1} \
+    CONFIG.c_include_s2mm {1} \
     CONFIG.c_include_s2mm_dre {1} \
+    CONFIG.c_m_axi_mm2s_data_width {128} \
+    CONFIG.c_m_axi_s2mm_data_width {128} \
+    CONFIG.c_m_axis_mm2s_tdata_width {48} \
+    CONFIG.c_mm2s_linebuffer_depth {4096} \
+    CONFIG.c_mm2s_max_burst_length {256} \
     CONFIG.c_num_fstores {1} \
     CONFIG.c_s2mm_linebuffer_depth {4096} \
-    CONFIG.c_mm2s_linebuffer_depth {4096} \
     CONFIG.c_s2mm_max_burst_length {256} \
-    CONFIG.c_mm2s_max_burst_length {256} \
   ] $axi_vdma_0
 
 
-  # Create instance: vdma_mem_ic (SmartConnect for VDMA → MIG)
-  # All three AXI ports (S00, S01, M00) are on MIG ui_clk, so NUM_CLKS=1.
+  # Create instance: vdma_mem_ic, and set properties
   set vdma_mem_ic [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 vdma_mem_ic ]
   set_property -dict [list \
-    CONFIG.NUM_SI   {2} \
-    CONFIG.NUM_MI   {1} \
     CONFIG.NUM_CLKS {1} \
+    CONFIG.NUM_MI {1} \
+    CONFIG.NUM_SI {2} \
   ] $vdma_mem_ic
 
 
-  # Create instance: rst_ddr4 (proc_sys_reset for MIG clock domain)
+  # Create instance: rst_ddr4, and set properties
   set rst_ddr4 [ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 rst_ddr4 ]
-
 
   # Create instance: vdma_frame_buffer_top_0, and set properties
   set block_name vdma_frame_buffer_top
@@ -1215,7 +1191,7 @@ proc create_root_design { parentCell } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
-
+  
   # Create instance: system_ila_0, and set properties
   set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
   set_property -dict [list \
@@ -1228,8 +1204,7 @@ proc create_root_design { parentCell } {
 
 
   # Create interface connections
-  connect_bd_intf_net -intf_net vdma_frame_buffer_top_0_M_AXIS [get_bd_intf_pins vdma_frame_buffer_top_0/M_AXIS] [get_bd_intf_pins v_hdmi_tx_ss/VIDEO_IN]
-connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_frame_buffer_top_0_M_AXIS] [get_bd_intf_pins vdma_frame_buffer_top_0/M_AXIS] [get_bd_intf_pins system_ila_0/SLOT_1_AXIS]
+  connect_bd_intf_net -intf_net ddr4_0_C0_DDR4 [get_bd_intf_ports ddr4_sdram_075] [get_bd_intf_pins ddr4_0/C0_DDR4]
   connect_bd_intf_net -intf_net intf_net_audio_ss_0_axis_audio_out [get_bd_intf_pins audio_ss_0/axis_audio_out] [get_bd_intf_pins v_hdmi_tx_ss/AUDIO_IN]
   connect_bd_intf_net -intf_net intf_net_bdry_in_DRU_CLK_IN [get_bd_intf_ports DRU_CLK_IN] [get_bd_intf_pins gt_refclk_buf/CLK_IN_D]
   connect_bd_intf_net -intf_net intf_net_rx_video_axis_reg_slice_M_AXIS [get_bd_intf_pins rx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins v_tpg_ss_0/s_axis_video]
@@ -1253,19 +1228,29 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_frame_buffer_top_0_M_AXIS] 
   connect_bd_intf_net -intf_net intf_net_zynq_us_ss_0_M05_AXI [get_bd_intf_pins zynq_us_ss_0/M05_AXI] [get_bd_intf_pins v_tpg_ss_0/S_AXI_TPG]
   connect_bd_intf_net -intf_net intf_net_zynq_us_ss_0_M06_AXI [get_bd_intf_pins zynq_us_ss_0/M06_AXI] [get_bd_intf_pins audio_ss_0/S00_AXI]
   connect_bd_intf_net -intf_net intf_net_zynq_us_ss_0_M08_AXI [get_bd_intf_pins zynq_us_ss_0/M08_AXI] [get_bd_intf_pins v_tpg_ss_0/S_AXI_GPIO]
-  connect_bd_intf_net -intf_net tx_video_axis_reg_slice_M_AXIS [get_bd_intf_pins tx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins vdma_frame_buffer_top_0/S_AXIS]
+  connect_bd_intf_net -intf_net tx_video_axis_reg_slice_M_AXIS [get_bd_intf_pins tx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins vdma_frame_buffer_top_0/HDMI_S_AXIS]
 connect_bd_intf_net -intf_net [get_bd_intf_nets tx_video_axis_reg_slice_M_AXIS] [get_bd_intf_pins tx_video_axis_reg_slice/M_AXIS] [get_bd_intf_pins system_ila_0/SLOT_0_AXIS]
-  # VDMA stream connections
-  connect_bd_intf_net -intf_net vdma_s2mm_stream [get_bd_intf_pins vdma_frame_buffer_top_0/VDMA_S2MM] [get_bd_intf_pins axi_vdma_0/S_AXIS_S2MM]
-  connect_bd_intf_net -intf_net vdma_mm2s_stream [get_bd_intf_pins axi_vdma_0/M_AXIS_MM2S] [get_bd_intf_pins vdma_frame_buffer_top_0/VDMA_MM2S]
-  # VDMA AXI-Lite configuration (RTL master → VDMA slave)
+  connect_bd_intf_net -intf_net user_si570_sysclk_1 [get_bd_intf_ports user_si570_sysclk] [get_bd_intf_pins ddr4_0/C0_SYS_CLK]
   connect_bd_intf_net -intf_net vdma_ctrl_axi_lite [get_bd_intf_pins vdma_frame_buffer_top_0/M_AXI_LITE] [get_bd_intf_pins axi_vdma_0/S_AXI_LITE]
-  # VDMA → SmartConnect → MIG memory path
+  connect_bd_intf_net -intf_net vdma_frame_buffer_top_0_M_AXIS [get_bd_intf_pins vdma_frame_buffer_top_0/HDMI_M_AXIS] [get_bd_intf_pins v_hdmi_tx_ss/VIDEO_IN]
+connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_frame_buffer_top_0_M_AXIS] [get_bd_intf_pins vdma_frame_buffer_top_0/HDMI_M_AXIS] [get_bd_intf_pins system_ila_0/SLOT_1_AXIS]
   connect_bd_intf_net -intf_net vdma_m_axi_mm2s [get_bd_intf_pins axi_vdma_0/M_AXI_MM2S] [get_bd_intf_pins vdma_mem_ic/S00_AXI]
   connect_bd_intf_net -intf_net vdma_m_axi_s2mm [get_bd_intf_pins axi_vdma_0/M_AXI_S2MM] [get_bd_intf_pins vdma_mem_ic/S01_AXI]
   connect_bd_intf_net -intf_net vdma_mem_ic_M00_AXI [get_bd_intf_pins vdma_mem_ic/M00_AXI] [get_bd_intf_pins ddr4_0/C0_DDR4_S_AXI]
+  connect_bd_intf_net -intf_net vdma_mm2s_stream [get_bd_intf_pins axi_vdma_0/M_AXIS_MM2S] [get_bd_intf_pins vdma_frame_buffer_top_0/VDMA_AXIS_MM2S]
+  connect_bd_intf_net -intf_net vdma_s2mm_stream [get_bd_intf_pins vdma_frame_buffer_top_0/VDMA_AXIS_S2MM] [get_bd_intf_pins axi_vdma_0/S_AXIS_S2MM]
 
   # Create port connections
+  connect_bd_net -net ddr4_0_c0_ddr4_ui_clk  [get_bd_pins ddr4_0/c0_ddr4_ui_clk] \
+  [get_bd_pins rst_ddr4/slowest_sync_clk] \
+  [get_bd_pins vdma_mem_ic/aclk] \
+  [get_bd_pins axi_vdma_0/m_axi_mm2s_aclk] \
+  [get_bd_pins axi_vdma_0/m_axi_s2mm_aclk]
+  connect_bd_net -net ddr4_0_c0_ddr4_ui_clk_sync_rst  [get_bd_pins ddr4_0/c0_ddr4_ui_clk_sync_rst] \
+  [get_bd_pins rst_ddr4/ext_reset_in]
+  connect_bd_net -net ddr4_0_c0_init_calib_complete  [get_bd_pins ddr4_0/c0_init_calib_complete] \
+  [get_bd_pins rst_ddr4/dcm_locked] \
+  [get_bd_pins vdma_frame_buffer_top_0/init_calib_complete]
   connect_bd_net -net net_audio_ss_0_aud_acr_cts_out  [get_bd_pins audio_ss_0/aud_acr_cts_out] \
   [get_bd_pins v_hdmi_tx_ss/acr_cts]
   connect_bd_net -net net_audio_ss_0_aud_acr_n_out  [get_bd_pins audio_ss_0/aud_acr_n_out] \
@@ -1387,30 +1372,18 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets tx_video_axis_reg_slice_M_AXIS] 
   [get_bd_pins vid_phy_controller/vid_phy_sb_aclk] \
   [get_bd_pins vid_phy_controller/vid_phy_axi4lite_aclk] \
   [get_bd_pins vid_phy_controller/drpclk]
-  # DDR4 physical pins and sys-clock port are created by apply_board_connection
-  # earlier — no manual per-pin connect_bd_net entries needed here.
-
-  # MIG clock domain connections
-  connect_bd_net -net ddr4_0_c0_ddr4_ui_clk  [get_bd_pins ddr4_0/c0_ddr4_ui_clk] \
-  [get_bd_pins rst_ddr4/slowest_sync_clk] \
-  [get_bd_pins vdma_mem_ic/aclk] \
-  [get_bd_pins axi_vdma_0/m_axi_mm2s_aclk] \
-  [get_bd_pins axi_vdma_0/m_axi_s2mm_aclk]
-  connect_bd_net -net ddr4_0_c0_ddr4_ui_clk_sync_rst  [get_bd_pins ddr4_0/c0_ddr4_ui_clk_sync_rst] \
-  [get_bd_pins rst_ddr4/ext_reset_in]
-  connect_bd_net -net ddr4_0_c0_init_calib_complete  [get_bd_pins ddr4_0/c0_init_calib_complete] \
-  [get_bd_pins rst_ddr4/dcm_locked] \
-  [get_bd_pins vdma_frame_buffer_top_0/init_calib_complete]
   connect_bd_net -net rst_ddr4_peripheral_aresetn  [get_bd_pins rst_ddr4/peripheral_aresetn] \
   [get_bd_pins vdma_mem_ic/aresetn] \
   [get_bd_pins ddr4_0/c0_ddr4_aresetn]
-  # VDMA stream-side clocks (HDMI clock domain)
   connect_bd_net -net sw_read_0_1  [get_bd_ports sw_read] \
   [get_bd_pins vdma_frame_buffer_top_0/sw_read]
   connect_bd_net -net sw_save_0_1  [get_bd_ports sw_save] \
   [get_bd_pins vdma_frame_buffer_top_0/sw_save]
 
   # Create address segments
+  assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces axi_vdma_0/Data_MM2S] [get_bd_addr_segs ddr4_0/C0_DDR4_MEMORY_MAP/C0_DDR4_ADDRESS_BLOCK] -force
+  assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces axi_vdma_0/Data_S2MM] [get_bd_addr_segs ddr4_0/C0_DDR4_MEMORY_MAP/C0_DDR4_ADDRESS_BLOCK] -force
+  assign_bd_address -offset 0x00000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces vdma_frame_buffer_top_0/M_AXI_LITE] [get_bd_addr_segs axi_vdma_0/S_AXI_LITE/Reg] -force
   assign_bd_address -offset 0x80000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces zynq_us_ss_0/zynq_us/Data] [get_bd_addr_segs audio_ss_0/aud_pat_gen/axi/reg0] -force
   assign_bd_address -offset 0x80060000 -range 0x00010000 -target_address_space [get_bd_addr_spaces zynq_us_ss_0/zynq_us/Data] [get_bd_addr_segs v_tpg_ss_0/axi_gpio/S_AXI/Reg] -force
   assign_bd_address -offset 0x80010000 -range 0x00010000 -target_address_space [get_bd_addr_spaces zynq_us_ss_0/zynq_us/Data] [get_bd_addr_segs audio_ss_0/clk_wiz/s_axi_lite/Reg] -force
@@ -1420,12 +1393,6 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets tx_video_axis_reg_slice_M_AXIS] 
   assign_bd_address -offset 0x80040000 -range 0x00020000 -target_address_space [get_bd_addr_spaces zynq_us_ss_0/zynq_us/Data] [get_bd_addr_segs v_hdmi_tx_ss/S_AXI_CPU_IN/Reg] -force
   assign_bd_address -offset 0x80070000 -range 0x00010000 -target_address_space [get_bd_addr_spaces zynq_us_ss_0/zynq_us/Data] [get_bd_addr_segs v_tpg_ss_0/v_tpg/s_axi_CTRL/Reg] -force
   assign_bd_address -offset 0x80080000 -range 0x00010000 -target_address_space [get_bd_addr_spaces zynq_us_ss_0/zynq_us/Data] [get_bd_addr_segs vid_phy_controller/vid_phy_axi4lite/Reg] -force
-
-  # VDMA → MIG address segments
-  assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces axi_vdma_0/Data_MM2S] [get_bd_addr_segs ddr4_0/C0_DDR4_MEMORY_MAP/C0_DDR4_ADDRESS_BLOCK] -force
-  assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces axi_vdma_0/Data_S2MM] [get_bd_addr_segs ddr4_0/C0_DDR4_MEMORY_MAP/C0_DDR4_ADDRESS_BLOCK] -force
-  # VDMA AXI-Lite register space (RTL controller → VDMA)
-  assign_bd_address -offset 0x00000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces vdma_frame_buffer_top_0/M_AXI_LITE] [get_bd_addr_segs axi_vdma_0/S_AXI_LITE/Reg] -force
 
 
   # Restore current instance
