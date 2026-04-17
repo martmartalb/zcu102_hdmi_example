@@ -38,6 +38,8 @@ entity vdma_ctrl is
         cfg_done            : out std_logic;
         cfg_error           : out std_logic;
 
+        init_calib_complete : in  std_logic;
+
         -- AXI4-Lite Master Interface
         m_axi_lite_awaddr   : out std_logic_vector(31 downto 0);
         m_axi_lite_awvalid  : out std_logic;
@@ -117,6 +119,16 @@ architecture rtl of vdma_ctrl is
     signal write_resp_error : std_logic := '0';
     signal error_reg     : std_logic := '0';
 
+    ---------------------------------------------------------------------------
+    -- Synchronize init_calib_complete
+    ---------------------------------------------------------------------------
+    signal calib_meta    : std_logic;
+    signal calib_sync    : std_logic;
+
+    attribute ASYNC_REG : string;
+    attribute ASYNC_REG of calib_meta : signal is "TRUE";
+    attribute ASYNC_REG of calib_sync : signal is "TRUE";
+
 begin
 
     ---------------------------------------------------------------------------
@@ -162,6 +174,22 @@ begin
     end process;
 
     ---------------------------------------------------------------------------
+    -- Synchronize init_calib_complete
+    ---------------------------------------------------------------------------
+    p_sync_calib : process(aclk)
+    begin
+        if rising_edge(aclk) then
+            if aresetn = '0' then
+                calib_meta <= '0';
+                calib_sync <= '0';
+            else
+                calib_meta <= init_calib_complete;
+                calib_sync <= calib_meta;
+            end if;
+        end if;
+    end process;
+
+    ---------------------------------------------------------------------------
     -- Main AXI4-Lite Write FSM
     ---------------------------------------------------------------------------
     p_fsm : process(aclk)
@@ -184,14 +212,16 @@ begin
                     -- S_START: Begin first transaction immediately
                     -------------------------------------------------------
                     when S_START =>
-                        axi_awaddr  <= CFG_ROM(wr_idx).addr;
-                        axi_awvalid <= '1';
-                        axi_wdata   <= CFG_ROM(wr_idx).data;
-                        axi_wvalid  <= '1';
-                        aw_accepted <= '0';
-                        w_accepted  <= '0';
-                        wr_idx      <= wr_idx + 1;
-                        state       <= S_WRITE_ADDR;
+                        if calib_sync = '1' then
+                            axi_awaddr  <= CFG_ROM(wr_idx).addr;
+                            axi_awvalid <= '1';
+                            axi_wdata   <= CFG_ROM(wr_idx).data;
+                            axi_wvalid  <= '1';
+                            aw_accepted <= '0';
+                            w_accepted  <= '0';
+                            wr_idx      <= wr_idx + 1;
+                            state       <= S_WRITE_ADDR;
+                        end if;
 
                     -------------------------------------------------------
                     -- S_WRITE_ADDR: Handle address/data channel handshakes

@@ -1350,43 +1350,45 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_s2mm_stream] [get_bd_intf_p
   [get_bd_pins tx_video_axis_reg_slice/aclk] \
   [get_bd_pins v_hdmi_tx_ss/s_axis_video_aclk] \
   [get_bd_pins v_hdmi_rx_ss/s_axis_video_aclk] \
-  [get_bd_pins vdma_frame_buffer_top_0/hdmi_clk] \
   [get_bd_pins system_ila_0/clk] \
-  [get_bd_pins axi_vdma_0/s_axi_lite_aclk] \
   [get_bd_pins axi_vdma_0/s_axis_s2mm_aclk] \
-  [get_bd_pins axi_vdma_0/m_axis_mm2s_aclk]
+  [get_bd_pins axi_vdma_0/m_axis_mm2s_aclk] \
+  [get_bd_pins vdma_frame_buffer_top_0/hdmi_clk]
   connect_bd_net -net net_zynq_us_ss_0_dcm_locked  [get_bd_pins zynq_us_ss_0/dcm_locked] \
   [get_bd_pins rx_video_axis_reg_slice/aresetn] \
   [get_bd_pins v_tpg_ss_0/m_axi_aresetn] \
   [get_bd_pins tx_video_axis_reg_slice/aresetn] \
   [get_bd_pins v_hdmi_tx_ss/s_axis_video_aresetn] \
   [get_bd_pins v_hdmi_rx_ss/s_axis_video_aresetn] \
-  [get_bd_pins vdma_frame_buffer_top_0/hdmi_resetn] \
   [get_bd_pins system_ila_0/resetn] \
-  [get_bd_pins axi_vdma_0/axi_resetn]
+  [get_bd_pins vdma_frame_buffer_top_0/hdmi_resetn]
   connect_bd_net -net net_zynq_us_ss_0_peripheral_aresetn  [get_bd_pins zynq_us_ss_0/peripheral_aresetn] \
   [get_bd_pins audio_ss_0/ARESETN] \
   [get_bd_pins v_hdmi_tx_ss/s_axi_cpu_aresetn] \
   [get_bd_pins v_hdmi_rx_ss/s_axi_cpu_aresetn] \
   [get_bd_pins vid_phy_controller/vid_phy_sb_aresetn] \
   [get_bd_pins vid_phy_controller/vid_phy_axi4lite_aresetn] \
-  [get_bd_ports SI5324_RST_OUT]
+  [get_bd_ports SI5324_RST_OUT] \
+  [get_bd_pins axi_vdma_0/axi_resetn] \
+  [get_bd_pins vdma_frame_buffer_top_0/axi_lite_resetn]
   connect_bd_net -net net_zynq_us_ss_0_s_axi_aclk  [get_bd_pins zynq_us_ss_0/s_axi_aclk] \
   [get_bd_pins audio_ss_0/ACLK] \
   [get_bd_pins v_hdmi_tx_ss/s_axi_cpu_aclk] \
   [get_bd_pins v_hdmi_rx_ss/s_axi_cpu_aclk] \
   [get_bd_pins vid_phy_controller/vid_phy_sb_aclk] \
   [get_bd_pins vid_phy_controller/vid_phy_axi4lite_aclk] \
-  [get_bd_pins vid_phy_controller/drpclk]
+  [get_bd_pins vid_phy_controller/drpclk] \
+  [get_bd_pins axi_vdma_0/s_axi_lite_aclk] \
+  [get_bd_pins vdma_frame_buffer_top_0/axi_lite_clk]
   connect_bd_net -net rst_ddr4_peripheral_aresetn  [get_bd_pins rst_ddr4/peripheral_aresetn] \
   [get_bd_pins vdma_mem_ic/aresetn] \
   [get_bd_pins ddr4_0/c0_ddr4_aresetn]
   connect_bd_net -net sw_read_0_1  [get_bd_ports sw_read] \
-  [get_bd_pins vdma_frame_buffer_top_0/sw_read] \
-  [get_bd_pins system_ila_0/probe1]
+  [get_bd_pins system_ila_0/probe1] \
+  [get_bd_pins vdma_frame_buffer_top_0/sw_read]
   connect_bd_net -net sw_save_0_1  [get_bd_ports sw_save] \
-  [get_bd_pins vdma_frame_buffer_top_0/sw_save] \
-  [get_bd_pins system_ila_0/probe0]
+  [get_bd_pins system_ila_0/probe0] \
+  [get_bd_pins vdma_frame_buffer_top_0/sw_save]
 
   # Create address segments
   assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces axi_vdma_0/Data_MM2S] [get_bd_addr_segs ddr4_0/C0_DDR4_MEMORY_MAP/C0_DDR4_ADDRESS_BLOCK] -force
@@ -1406,6 +1408,7 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_s2mm_stream] [get_bd_intf_p
   # Restore current instance
   current_bd_instance $oldCurInst
 
+  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
@@ -1417,6 +1420,4 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_s2mm_stream] [get_bd_intf_p
 
 create_root_design ""
 
-
-common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
 
