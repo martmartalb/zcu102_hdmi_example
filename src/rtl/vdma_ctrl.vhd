@@ -15,7 +15,8 @@
 --   0x58  MM2S_FRMDLY_STRIDE    0xA8  S2MM_FRMDLY_STRIDE
 --   0x5C  MM2S_START_ADDRESS1   0xAC  S2MM_START_ADDRESS1
 --
--- Writing VSIZE is the "trigger" that starts each channel.
+-- Programming order per PG020: VDMACR (RS=1) first, then START_ADDRESS,
+-- STRIDE, HSIZE, and finally VSIZE — writing VSIZE starts the channel.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -78,18 +79,18 @@ architecture rtl of vdma_ctrl is
     constant DMACR_RUN_CIRC : std_logic_vector(31 downto 0) := x"00010083";
 
     constant CFG_ROM : cfg_rom_t := (
-        -- S2MM channel (capture to DDR4) — configure before VSIZE trigger
-        0 => (addr => x"000000AC", data => FRAME_BASE_ADDR),   -- S2MM start addr
-        1 => (addr => x"000000A8", data => STRIDE),            -- S2MM stride
-        2 => (addr => x"000000A4", data => HSIZE),             -- S2MM hsize
-        3 => (addr => x"000000A0", data => VSIZE),             -- S2MM vsize
-        4 => (addr => x"00000030", data => DMACR_RUN_CIRC),    -- S2MM DMACR (START)
-        -- MM2S channel (playback from DDR4)
-        5 => (addr => x"0000005C", data => FRAME_BASE_ADDR),   -- MM2S start addr
-        6 => (addr => x"00000058", data => STRIDE),            -- MM2S stride
-        7 => (addr => x"00000054", data => HSIZE),             -- MM2S hsize
-        8 => (addr => x"00000050", data => VSIZE),             -- MM2S vsize
-        9 => (addr => x"00000000", data => DMACR_RUN_CIRC)     -- MM2S DMACR (START)
+        -- S2MM channel (capture to DDR4): DMACR first (RS=1), VSIZE last (trigger)
+        0 => (addr => x"00000030", data => DMACR_RUN_CIRC),    -- S2MM DMACR (RS=1)
+        1 => (addr => x"000000AC", data => FRAME_BASE_ADDR),   -- S2MM start addr
+        2 => (addr => x"000000A8", data => STRIDE),            -- S2MM stride
+        3 => (addr => x"000000A4", data => HSIZE),             -- S2MM hsize
+        4 => (addr => x"000000A0", data => VSIZE),             -- S2MM vsize (trigger)
+        -- MM2S channel (playback from DDR4): DMACR first (RS=1), VSIZE last (trigger)
+        5 => (addr => x"00000000", data => DMACR_RUN_CIRC),    -- MM2S DMACR (RS=1)
+        6 => (addr => x"0000005C", data => FRAME_BASE_ADDR),   -- MM2S start addr
+        7 => (addr => x"00000058", data => STRIDE),            -- MM2S stride
+        8 => (addr => x"00000054", data => HSIZE),             -- MM2S hsize
+        9 => (addr => x"00000050", data => VSIZE)              -- MM2S vsize (trigger)
     );
 
     ---------------------------------------------------------------------------

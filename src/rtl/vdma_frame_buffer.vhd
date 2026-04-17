@@ -199,10 +199,11 @@ begin
 
     ---------------------------------------------------------------------------
     -- VDMA S2MM
-    --   Always driven by HDMI_S_AXIS
+    --   Only driven in save mode; tvalid gated to prevent writes in read/
+    --   passthrough modes (avoids DDR corruption and AXI protocol violations).
     ---------------------------------------------------------------------------
     VDMA_AXIS_S2MM_tdata    <= HDMI_S_AXIS_tdata;
-    VDMA_AXIS_S2MM_tvalid   <= HDMI_S_AXIS_tvalid;
+    VDMA_AXIS_S2MM_tvalid   <= HDMI_S_AXIS_tvalid when saving = '1' else '0';
     VDMA_AXIS_S2MM_tlast    <= HDMI_S_AXIS_tlast;
     VDMA_AXIS_S2MM_tuser    <= HDMI_S_AXIS_tuser;
 
