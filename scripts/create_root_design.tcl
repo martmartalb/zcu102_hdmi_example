@@ -1195,11 +1195,15 @@ proc create_root_design { parentCell } {
   # Create instance: system_ila_0, and set properties
   set system_ila_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:system_ila:1.1 system_ila_0 ]
   set_property -dict [list \
-    CONFIG.C_DATA_DEPTH {131072} \
-    CONFIG.C_NUM_MONITOR_SLOTS {2} \
-    CONFIG.C_SLOT {1} \
+    CONFIG.C_DATA_DEPTH {8192} \
+    CONFIG.C_MON_TYPE {MIX} \
+    CONFIG.C_NUM_MONITOR_SLOTS {4} \
+    CONFIG.C_NUM_OF_PROBES {2} \
+    CONFIG.C_SLOT {3} \
     CONFIG.C_SLOT_0_INTF_TYPE {xilinx.com:interface:axis_rtl:1.0} \
     CONFIG.C_SLOT_1_INTF_TYPE {xilinx.com:interface:axis_rtl:1.0} \
+    CONFIG.C_SLOT_2_INTF_TYPE {xilinx.com:interface:axis_rtl:1.0} \
+    CONFIG.C_SLOT_3_INTF_TYPE {xilinx.com:interface:axis_rtl:1.0} \
   ] $system_ila_0
 
 
@@ -1238,7 +1242,9 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_frame_buffer_top_0_M_AXIS] 
   connect_bd_intf_net -intf_net vdma_m_axi_s2mm [get_bd_intf_pins axi_vdma_0/M_AXI_S2MM] [get_bd_intf_pins vdma_mem_ic/S01_AXI]
   connect_bd_intf_net -intf_net vdma_mem_ic_M00_AXI [get_bd_intf_pins vdma_mem_ic/M00_AXI] [get_bd_intf_pins ddr4_0/C0_DDR4_S_AXI]
   connect_bd_intf_net -intf_net vdma_mm2s_stream [get_bd_intf_pins axi_vdma_0/M_AXIS_MM2S] [get_bd_intf_pins vdma_frame_buffer_top_0/VDMA_AXIS_MM2S]
+connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_mm2s_stream] [get_bd_intf_pins axi_vdma_0/M_AXIS_MM2S] [get_bd_intf_pins system_ila_0/SLOT_3_AXIS]
   connect_bd_intf_net -intf_net vdma_s2mm_stream [get_bd_intf_pins vdma_frame_buffer_top_0/VDMA_AXIS_S2MM] [get_bd_intf_pins axi_vdma_0/S_AXIS_S2MM]
+connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_s2mm_stream] [get_bd_intf_pins vdma_frame_buffer_top_0/VDMA_AXIS_S2MM] [get_bd_intf_pins system_ila_0/SLOT_2_AXIS]
 
   # Create port connections
   connect_bd_net -net ddr4_0_c0_ddr4_ui_clk  [get_bd_pins ddr4_0/c0_ddr4_ui_clk] \
@@ -1376,9 +1382,11 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_frame_buffer_top_0_M_AXIS] 
   [get_bd_pins vdma_mem_ic/aresetn] \
   [get_bd_pins ddr4_0/c0_ddr4_aresetn]
   connect_bd_net -net sw_read_0_1  [get_bd_ports sw_read] \
-  [get_bd_pins vdma_frame_buffer_top_0/sw_read]
+  [get_bd_pins vdma_frame_buffer_top_0/sw_read] \
+  [get_bd_pins system_ila_0/probe1]
   connect_bd_net -net sw_save_0_1  [get_bd_ports sw_save] \
-  [get_bd_pins vdma_frame_buffer_top_0/sw_save]
+  [get_bd_pins vdma_frame_buffer_top_0/sw_save] \
+  [get_bd_pins system_ila_0/probe0]
 
   # Create address segments
   assign_bd_address -offset 0x00000000 -range 0x40000000 -target_address_space [get_bd_addr_spaces axi_vdma_0/Data_MM2S] [get_bd_addr_segs ddr4_0/C0_DDR4_MEMORY_MAP/C0_DDR4_ADDRESS_BLOCK] -force
@@ -1398,7 +1406,6 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_frame_buffer_top_0_M_AXIS] 
   # Restore current instance
   current_bd_instance $oldCurInst
 
-  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
@@ -1410,4 +1417,6 @@ connect_bd_intf_net -intf_net [get_bd_intf_nets vdma_frame_buffer_top_0_M_AXIS] 
 
 create_root_design ""
 
+
+common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
 
