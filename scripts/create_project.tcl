@@ -150,7 +150,18 @@ set_property -name "used_in" -value "synthesis implementation" -objects $file_ob
 set_property -name "used_in_simulation" -value "0" -objects $file_obj
 set_property -name "file_type" -value "VHDL" -objects $file_obj
 
-# No standalone IP cores — VDMA is instantiated in the block design
+# Add all .xci IP files from src/ip/ with properties
+set obj [get_filesets sources_1]
+set ip_files [list \
+ [file normalize "${origin_dir}/src/ip/ila_vdma/ila_vdma.xci"] \
+]
+add_files -norecurse -fileset $obj $ip_files
+
+foreach ip [get_ips] {
+    generate_target all $ip
+}
+
+puts "INFO: Added [llength $ip_files] IP cores"
 
 # Set 'sources_1' fileset file properties for local files
 # None
