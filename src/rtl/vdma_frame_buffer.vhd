@@ -169,7 +169,7 @@ begin
     -- sw_read  --> sw_read_meta --> sw_read_sync --> debouncer --> sw_read_deb
     -- sw_read takes priority over sw_save
     ----------------------------------------------------------------------------
-    reading <= sw_save_deb;
+    reading <= sw_read_deb;
     saving  <= sw_save_deb and not sw_read_deb;
 
     ---------------------------------------------------------------------------
