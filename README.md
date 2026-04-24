@@ -51,29 +51,29 @@ Key additions over the base Xilinx example:
 ## Architecture
 
 ```
-                   ┌────────────────────────────────────────────────────┐
-                   │                  ZCU102 PL Fabric                   │
-                   │                                                      │
-  HDMI RX  ──────► │ v_hdmi_rx_ss ──► rx_reg_slice ─────────────────► │
-  (PHY J1)         │                                                    │
-                   │                  ┌─────────────────────────────┐   │
-                   │                  │  vdma_frame_buffer_top      │   │
-                   │                  │                             │   │
-                   │  input ─────────►│ HDMI_S_AXIS    HDMI_M_AXIS │──► tx_reg_slice ──► v_hdmi_tx_ss ──► HDMI TX (PHY J2)
-                   │                  │                             │   │
-                   │  sw_save ───────►│ vdma_frame_buffer           │   │
-                   │  sw_read ───────►│  (AXI Stream switch)        │   │
-                   │                  │                             │   │
-                   │                  │ VDMA_S2MM ─────────────────►│──► axi_vdma_0 ──► vdma_mem_ic ──► DDR4
-                   │                  │ VDMA_MM2S ◄─────────────────│◄── axi_vdma_0 ◄── vdma_mem_ic ◄── DDR4
-                   │                  │                             │   │
-                   │                  │ M_AXI_LITE ─────────────────│──► axi_vdma_0 (register config)
-                   │                  │  vdma_ctrl                  │   │
-                   │                  └─────────────────────────────┘   │
-                   │                                                      │
-                   │  init_calib_complete ──────────────────────────────► vdma_frame_buffer_top
-                   │  (from DDR4 MIG)                                     │
-                   └────────────────────────────────────────────────────┘
+            ┌────────────────────────────────────────────────────┐
+            │                  ZCU102 PL Fabric                  │
+            │                                                    │
+  HDMI RX  ──────────┐                                           │
+  (PHY J1)  │        │                                           │
+            │        │         ┌─────────────────────────────┐   │
+            │        │         │  vdma_frame_buffer_top      │   │
+            │        │         │                             │   │
+            │        └────────►│ HDMI_S_AXIS    HDMI_M_AXIS  │──► HDMI TX (PHY J2)
+            │                  │                             │   │
+  sw_save ────────────────────►│ vdma_frame_buffer           │   │
+  sw_read ────────────────────►│  (AXI Stream switch)        │   │
+            │                  │                             │   │
+            │                  │ VDMA_S2MM ─────────────────►│──► axi_vdma_0  ──► DDR4
+            │                  │ VDMA_MM2S ◄─────────────────│◄── axi_vdma_0 ◄── DDR4
+            │                  │                             │   │
+            │                  │ M_AXI_LITE ─────────────────│──► axi_vdma_0 (reg. config)
+            │                  │  vdma_ctrl                  │   │
+            │                  └──────────────↑──────────────┘   │
+            │                                 │                  │
+            │  init_calib_complete ───────────┘                  │
+            │  (from DDR4 MIG)                                   │
+            └────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -96,15 +96,12 @@ HDMI RX ────────────────────────
 ### Mode 2: Save / Broadcast (`sw_save` ON, `sw_read` OFF)
 
 ```
-HDMI RX ─────────────────────────────────────────► HDMI TX
-               │
-               └─────────────────────────────────► VDMA S2MM ──► DDR4
+HDMI RX ─────────────────────────────────────────► VDMA S2MM ──► DDR4
 ```
 
-- HDMI input is broadcast to both the HDMI TX output (passthrough) and the VDMA capture path (S2MM → DDR4)
+- HDMI input is broadcast to the VDMA capture path (S2MM → DDR4)
 - The VDMA continuously overwrites a single frame in DDR4 in circular mode
 - AXI Stream backpressure from the VDMA S2MM propagates back to HDMI RX input, so no pixel is dropped
-- Video is visible on the monitor while being captured simultaneously
 
 ### Mode 3: Read / Playback (`sw_read` ON, regardless of `sw_save`)
 
@@ -174,18 +171,18 @@ An AXI4-Lite master FSM that programs the Xilinx AXI VDMA IP once at startup. No
 
 **Configuration ROM** (both S2MM and MM2S channels, 1920×1080 frame):
 
-| Step | Register | Offset | Value | Description |
-|------|----------|--------|-------|-------------|
-| 0 | S2MM DMACR | 0x30 | 0x00010083 | Run, Circular mode |
-| 1 | S2MM START_ADDR1 | 0xAC | 0x00000000 | DDR4 frame base address |
-| 2 | S2MM FRMDLY_STRIDE | 0xA8 | 0x00001680 | Stride = 5760 bytes (1920×3) |
-| 3 | S2MM HSIZE | 0xA4 | 0x00001680 | Horizontal size = 5760 bytes |
-| 4 | S2MM VSIZE | 0xA0 | 0x00000438 | Vertical size = 1080 — **triggers start** |
-| 5 | MM2S DMACR | 0x00 | 0x00010083 | Run, Circular mode |
-| 6 | MM2S START_ADDR1 | 0x5C | 0x00000000 | DDR4 frame base address |
-| 7 | MM2S FRMDLY_STRIDE | 0x58 | 0x00001680 | Stride = 5760 bytes |
-| 8 | MM2S HSIZE | 0x54 | 0x00001680 | Horizontal size = 5760 bytes |
-| 9 | MM2S VSIZE | 0x50 | 0x00000438 | Vertical size = 1080 — **triggers start** |
+| Step | Register        | Offset | Value      | Description                        |
+|------|-----------------|--------|------------|------------------------------------|
+| 0 | S2MM DMACR         | 0x30   | 0x00010083 | Run, Circular mode                 |
+| 1 | S2MM START_ADDR1   | 0xAC   | 0x00000000 | DDR4 frame base address            |
+| 2 | S2MM FRMDLY_STRIDE | 0xA8   | 0x00001680 | Stride = 5760 bytes (1920×3)       |
+| 3 | S2MM HSIZE         | 0xA4   | 0x00001680 | Horizontal size = 5760 bytes       |
+| 4 | S2MM VSIZE         | 0xA0   | 0x00000438 | Vertical size = 1080 — **trigger** |
+| 5 | MM2S DMACR         | 0x00   | 0x00010083 | Run, Circular mode                 |
+| 6 | MM2S START_ADDR1   | 0x5C   | 0x00000000 | DDR4 frame base address            |
+| 7 | MM2S FRMDLY_STRIDE | 0x58   | 0x00001680 | Stride = 5760 bytes                |
+| 8 | MM2S HSIZE         | 0x54   | 0x00001680 | Horizontal size = 5760 bytes       |
+| 9 | MM2S VSIZE         | 0x50   | 0x00000438 | Vertical size = 1080 — **trigger** |
 
 Writing VSIZE last is mandatory per the AXI VDMA specification (PG020) — it is the register that arms and launches the DMA channel.
 
@@ -316,7 +313,7 @@ build/
 | SW_SAVE (AK13) | SW_READ (AL13) | Mode | Description |
 |:-:|:-:|---|---|
 | 0 | 0 | Passthrough | HDMI input displayed directly on output |
-| 1 | 0 | Save | Input captured to DDR4, also shown on output |
+| 1 | 0 | Save | Input captured to DDR4                       |
 | 0 | 1 | Read | Stored frame played back in a loop on output |
 | 1 | 1 | Read | `sw_read` dominates — same as Read mode |
 
