@@ -7,12 +7,14 @@ This project extends the Xilinx HDMI example design for the ZCU102 (Zynq UltraSc
 ## Overview
 
 ```
-HDMI RX ──► [AXI Stream] ──► ddr4_frame_buffer ──► [AXI Stream] ──► HDMI TX
-                                     │
-                              ┌──────┴──────┐
-                              │  DDR4 MIG   │
-                              │  (ZCU102)   │
-                              └─────────────┘
+                             ┌───────────────────┐
+HDMI RX ──► [AXI Stream] ──► | ddr4_frame_buffer |  ──► [AXI Stream] ──► HDMI TX
+                             └───────────────────┘
+                                       │
+                                ┌──────┴──────┐
+                                │  DDR4 MIG   │
+                                │  (ZCU102)   │
+                                └─────────────┘
 ```
 
 The core module (`src/rtl/ddr4_frame_buffer.vhd`) sits between the HDMI RX and TX subsystems as an AXI4-Stream pass-through with optional frame capture and playback. The top-level wrapper (`ddr4_frame_buffer_top.vhd`) instantiates the DDR4 MIG IP alongside it.
@@ -183,12 +185,10 @@ zcu102_hdmi_example/
 
 ## Build
 
-Use the provided Vivado TCL scripts:
+Use the provided Makefile:
 
-```tcl
-# From Vivado Tcl console:
-source scripts/create_project.tcl
-source scripts/create_root_design.tcl
+```make
+make vitis_app
 ```
 
 Post-route physical optimisation scripts (`phys_opt_design.tcl`, `postroute_phys_opt_design.tcl`) are provided for timing closure.
