@@ -175,12 +175,12 @@ begin
     ---------------------------------------------------------------------------
     -- S_AXIS backpressure
     --   Read mode:  always accept (discard RX input)
-    --   Save mode:  both TX and VDMA S2MM must be ready (broadcast)
+    --   Save mode:  VDMA S2MM must be ready
     --   Passthrough: follow TX ready
     ---------------------------------------------------------------------------
     HDMI_S_AXIS_tready <= 
-        '1'                                          when reading = '1' else
-        HDMI_M_AXIS_tready and VDMA_AXIS_S2MM_tready when saving  = '1' else
+        '1'                   when reading = '1' else
+        VDMA_AXIS_S2MM_tready when saving  = '1' else
         HDMI_M_AXIS_tready;
 
     ---------------------------------------------------------------------------
@@ -199,12 +199,13 @@ begin
 
     ---------------------------------------------------------------------------
     -- VDMA S2MM
-    --   Always driven by HDMI_S_AXIS
+    --   Only driven in save mode; tvalid gated to prevent writes in read/
+    --   passthrough modes (avoids DDR corruption and AXI protocol violations).
     ---------------------------------------------------------------------------
-    VDMA_AXIS_S2MM_tdata    <= HDMI_S_AXIS_tdata;
-    VDMA_AXIS_S2MM_tvalid   <= HDMI_S_AXIS_tvalid;
-    VDMA_AXIS_S2MM_tlast    <= HDMI_S_AXIS_tlast;
-    VDMA_AXIS_S2MM_tuser    <= HDMI_S_AXIS_tuser;
+    VDMA_AXIS_S2MM_tdata    <= HDMI_S_AXIS_tdata  when saving = '1' else (others => '0');
+    VDMA_AXIS_S2MM_tvalid   <= HDMI_S_AXIS_tvalid when saving = '1' else '0';
+    VDMA_AXIS_S2MM_tlast    <= HDMI_S_AXIS_tlast  when saving = '1' else '0';
+    VDMA_AXIS_S2MM_tuser    <= HDMI_S_AXIS_tuser  when saving = '1' else (others => '0');
 
     ---------------------------------------------------------------------------
     -- VDMA MM2S (playback from DDR)

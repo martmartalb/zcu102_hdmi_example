@@ -24,6 +24,9 @@ entity vdma_frame_buffer_top is
         hdmi_clk             : in  std_logic;
         hdmi_resetn          : in  std_logic;
 
+        axi_lite_clk         : in  std_logic;
+        axi_lite_resetn      : in  std_logic;
+
         -- AXI Stream Slave (from HDMI RX)
         HDMI_S_AXIS_tdata         : in  std_logic_vector(47 downto 0);
         HDMI_S_AXIS_tvalid        : in  std_logic;
@@ -94,7 +97,13 @@ architecture structural of vdma_frame_buffer_top is
 
     ATTRIBUTE X_INTERFACE_PARAMETER : STRING;
     attribute X_INTERFACE_PARAMETER of hdmi_clk : signal is
-        "ASSOCIATED_BUSIF HDMI_S_AXIS:HDMI_M_AXIS:VDMA_AXIS_S2MM:VDMA_AXIS_MM2S:M_AXI_LITE, ASSOCIATED_RESET hdmi_resetn, FREQ_HZ 299970032";
+        "ASSOCIATED_BUSIF HDMI_S_AXIS:HDMI_M_AXIS:VDMA_AXIS_S2MM:VDMA_AXIS_MM2S, ASSOCIATED_RESET hdmi_resetn, FREQ_HZ 299970032";
+
+    ATTRIBUTE X_INTERFACE_INFO of axi_lite_clk: SIGNAL is
+        "xilinx.com:signal:clock:1.0 axi_lite_clk CLK";
+
+    attribute X_INTERFACE_PARAMETER of axi_lite_clk : signal is
+        "ASSOCIATED_BUSIF M_AXI_LITE, ASSOCIATED_RESET axi_lite_resetn, FREQ_HZ 99990005";
 
 begin
 
@@ -145,8 +154,10 @@ begin
             STRIDE          => x"00001680"    -- 5760 bytes
         )
         port map (
-            aclk                => hdmi_clk,
-            aresetn             => hdmi_resetn,
+            aclk                => axi_lite_clk,
+            aresetn             => axi_lite_resetn,
+
+            init_calib_complete => init_calib_complete,
 
             m_axi_lite_awaddr   => M_AXI_LITE_awaddr,
             m_axi_lite_awvalid  => M_AXI_LITE_awvalid,
